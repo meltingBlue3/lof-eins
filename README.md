@@ -21,8 +21,10 @@ lof-eins/
 │   └── config/                   # 配置数据
 │       ├── fees.csv              # 费率配置
 │       └── fund_status.db        # 限购事件 (SQLite)
+├── data_loader.py                # 数据加载器
 ├── run_generator.py              # 运行脚本
 ├── inspect_data.py               # 数据可视化验证脚本
+├── test_data_loader.py           # DataLoader 测试脚本
 └── requirements.txt
 ```
 
@@ -74,6 +76,50 @@ config = MockConfig(
 
 generate_mock_data(config)
 ```
+
+## 使用 DataLoader 读取数据
+
+生成数据后，使用 `DataLoader` 类读取和对齐所有数据源：
+
+```python
+from data_loader import DataLoader
+
+# 初始化 DataLoader
+loader = DataLoader(data_dir='./data/mock')
+
+# 加载单个 ticker 的完整数据
+df = loader.load_bundle('161005')
+
+# 支持日期过滤
+df_filtered = loader.load_bundle('161005', start_date='2024-03-01', end_date='2024-06-30')
+
+# 加载费率配置
+fees = loader.load_fees('161005')
+print(fees)
+# Output: {'fee_rate_tier_1': 0.015, 'fee_limit_1': 500000.0, ...}
+```
+
+### DataLoader 返回的 DataFrame 结构
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| (index) | DatetimeIndex | 交易日期 |
+| open | float | 开盘价 |
+| high | float | 最高价 |
+| low | float | 最低价 |
+| close | float | 收盘价 |
+| volume | int | 成交量 |
+| nav | float | 净值 |
+| premium_rate | float | 溢价率 `(close - nav) / nav` |
+| daily_limit | float | 当日申购限额（无限购时为 `inf`） |
+
+### DataLoader 特性
+
+1. **自动对齐多源数据**：基于日期索引自动合并市场数据、NAV 和限购事件
+2. **限购事件重采样**：将 SQLite 中的时间段数据重采样为每日序列
+3. **预计算溢价率**：自动计算并验证 `premium_rate = (close - nav) / nav`
+4. **数据清洗**：使用 `ffill()` 自动处理缺失值
+5. **费率缓存**：费率配置在首次加载后缓存，提高性能
 
 ## 配置参数说明
 
