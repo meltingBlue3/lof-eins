@@ -1,8 +1,8 @@
-# LOF Fund Arbitrage Backtesting System - Mock Data Generator
+# LOF Fund Arbitrage Backtesting System
 
 ## 概述
 
-这是一个配置驱动的 LOF (Listed Open-Ended Fund) 基金套利回测系统的 mock 数据生成器。生成高仿真的测试数据，包括市场行情、NAV、费率配置和基于溢价率动态触发的限购事件。
+这是一个配置驱动的 LOF (Listed Open-Ended Fund) 基金套利回测系统。系统包含 mock 数据生成器和完整的回测引擎，支持 T+2 结算、阶梯费率计算和全面的绩效指标分析。
 
 ## 项目结构
 
@@ -10,6 +10,7 @@
 lof-eins/
 ├── src/                          # 主源代码包
 │   ├── __init__.py
+│   ├── config.py                 # 回测配置 (BacktestConfig)
 │   ├── data/                     # 数据模块
 │   │   ├── __init__.py
 │   │   ├── loader.py             # 数据加载器 (DataLoader)
@@ -18,8 +19,14 @@ lof-eins/
 │   │       ├── config.py         # 配置类 (MockConfig)
 │   │       ├── generators.py     # 数据生成器
 │   │       └── main.py           # 主入口
-│   └── engine/                   # 回测引擎（待实现）
-│       └── __init__.py
+│   ├── strategy/                 # 策略模块
+│   │   ├── __init__.py
+│   │   ├── base.py               # 策略基类 (BaseStrategy, Signal)
+│   │   └── simple_lof.py         # 简单 LOF 策略
+│   └── engine/                   # 回测引擎
+│       ├── __init__.py
+│       ├── account.py            # 账户管理 (T+2 结算)
+│       └── backtest.py           # 回测执行引擎
 ├── scripts/                      # 可执行脚本
 │   ├── generate_mock.py          # 生成 mock 数据
 │   └── inspect_data.py           # 数据可视化验证
@@ -49,7 +56,9 @@ pip install -r requirements.txt
 
 ## 快速开始
 
-### 使用默认配置
+### 1. 生成 Mock 数据
+
+#### 使用默认配置
 
 ```python
 from src.data.generator import MockConfig, generate_mock_data
@@ -64,7 +73,7 @@ generate_mock_data()
 python scripts/generate_mock.py
 ```
 
-### 自定义配置
+#### 自定义配置
 
 ```python
 from src.data.generator import MockConfig, generate_mock_data
@@ -84,6 +93,151 @@ config = MockConfig(
 
 generate_mock_data(config)
 ```
+
+### 2. 运行回测
+
+```python
+import logging
+from src import BacktestConfig, BacktestEngine, SimpleLOFStrategy, DataLoader
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+
+# 回测配置
+config = BacktestConfig(
+    initial_cash=300_000.0,     # 初始资金
+    buy_threshold=0.02,         # 2% 溢价率触发买入
+    liquidity_ratio=0.1,        # 使用 10% 的可用流动性
+    commission_rate=0.0003,     # 0.03% 卖出佣金
+    risk_mode='fixed',          # 固定资金模式
+    use_ma5_liquidity=True,     # 使用 MA5 成交量
+    risk_free_rate=0.02         # 2% 无风险利率
+)
+
+# 初始化回测引擎
+strategy = SimpleLOFStrategy()
+loader = DataLoader(data_dir='./data/mock')
+engine = BacktestEngine(config=config, strategy=strategy, data_loader=loader)
+
+# 运行回测
+result = engine.run(ticker='161005')
+
+# 打印结果
+print(result)
+print(f"\n交易记录:\n{result.trade_logs.head()}")
+print(f"\n每日绩效:\n{result.daily_perf.head()}")
+```
+
+#### 输出示例
+
+```
+============================================================
+BACKTEST RESULTS
+============================================================
+
+Performance Metrics:
+  Total Return:         125.91%
+  Annualized Return:    118.99%
+  Max Drawdown:          17.06%
+  Sharpe Ratio:            2.11
+
+Trading Summary:
+  Total Trades:             283
+  Buy Trades:               142
+  Sell Trades:              141
+
+Account Summary:
+  Initial Capital:       312,546.70 CNY
+  Final Value:           706,068.16 CNY
+  Profit/Loss:           393,521.46 CNY
+
+Configuration:
+  Buy Threshold:          2.00%
+  Liquidity Ratio:       10.00%
+  Risk Mode:              fixed
+============================================================
+```
+
+## 回测引擎架构
+
+### 核心组件
+
+```mermaid
+graph TB
+    subgraph config [配置层]
+        BC[BacktestConfig]
+    end
+    
+    subgraph strategy [策略层]
+        SB[BaseStrategy]
+        SL[SimpleLOFStrategy]
+        SL --> SB
+    end
+    
+    subgraph engine [引擎层]
+        ACC[Account - T+2结算]
+        BE[BacktestEngine]
+        BR[BacktestResult]
+        BE --> ACC
+        BE --> BR
+    end
+    
+    subgraph data [数据层]
+        DL[DataLoader]
+    end
+    
+    BE --> SL
+    BE --> DL
+    BC --> BE
+```
+
+### BacktestConfig 参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `initial_cash` | float | `300_000.0` | 初始资金 |
+| `liquidity_ratio` | float | `0.1` | 流动性比例（占可用成交量的比例） |
+| `buy_threshold` | float | `0.02` | 买入阈值（最低溢价率） |
+| `commission_rate` | float | `0.0003` | 卖出佣金率 |
+| `risk_mode` | str | `'fixed'` | 风险模式（'fixed' 或 'infinite'） |
+| `use_ma5_liquidity` | bool | `True` | 是否使用 MA5 成交量限制 |
+| `risk_free_rate` | float | `0.02` | 无风险利率（用于夏普比率） |
+
+### SimpleLOFStrategy 逻辑
+
+1. **卖出**：如果持有任何仓位 -> 全部卖出（快速止盈）
+2. **买入**：如果 `溢价率 > buy_threshold` 且 `daily_limit > 0` -> 买入最大可能金额
+
+### T+2 结算机制
+
+- **买入**：资金立即扣除，份额进入待结算队列（T+2 交易日后到账）
+- **卖出**：资金 T+0 到账（立即可用），仅能卖出已结算份额
+- **结算日期**：基于实际交易日历计算（非自然日）
+
+### 费率计算（阶梯式）
+
+| 申购金额 | 费率类型 | 费率 |
+|---------|---------|------|
+| < 50万 | 比例费率 | 1.5% |
+| 50万 - 200万 | 比例费率 | 1.0% |
+| ≥ 200万 | 固定费用 | 1000 元/笔 |
+
+**卖出佣金**：按 `commission_rate` 比例收取（默认 0.03%）
+
+### 约束条件（买入时取最小值）
+
+1. **限购约束**：`row['daily_limit']`（来自 SQLite 限购事件）
+2. **流动性约束**：`min(volume, ma5_volume) * liquidity_ratio * price`
+3. **资金约束**：`account.cash`（仅在 `risk_mode='fixed'` 时）
+
+### BacktestResult 指标
+
+| 指标 | 计算公式 | 说明 |
+|------|---------|------|
+| `total_return` | `(End / Start) - 1` | 总收益率 |
+| `annualized_return` | `(1 + R)^(252/n) - 1` | 年化收益率（假设 252 个交易日） |
+| `max_drawdown` | `max((Peak - Trough) / Peak)` | 最大回撤 |
+| `sharpe_ratio` | `(R - Rf) / σ` | 夏普比率（年化） |
 
 ## 使用 DataLoader 读取数据
 
@@ -377,12 +531,84 @@ Configuration:
 
 **结论**：对于测试数据生成，方案 1 更合适。如需更高仿真度，可在后续版本中考虑方案 2。
 
+## 自定义策略
+
+通过继承 `BaseStrategy` 实现自定义策略：
+
+```python
+from src.strategy.base import BaseStrategy, Signal
+from typing import Dict, List
+import pandas as pd
+
+class MyStrategy(BaseStrategy):
+    def generate_signals(
+        self,
+        row: pd.Series,
+        positions: Dict[str, float],
+        config: BacktestConfig
+    ) -> List[Signal]:
+        signals = []
+        ticker = row['ticker']
+        
+        # 自定义逻辑
+        if row['premium_rate'] > 0.05:  # 5% 溢价时买入
+            signals.append(Signal('buy', ticker, 100_000.0))
+        
+        if row['premium_rate'] < 0.01:  # 1% 溢价时卖出
+            if positions.get(ticker, 0) > 0:
+                signals.append(Signal('sell', ticker, float('inf')))
+        
+        return signals
+```
+
+## API 参考
+
+### BacktestEngine
+
+```python
+engine = BacktestEngine(
+    config: BacktestConfig,
+    strategy: BaseStrategy,
+    data_loader: Optional[DataLoader] = None
+)
+
+result = engine.run(
+    ticker: str,
+    start_date: Optional[str] = None,  # 'YYYY-MM-DD'
+    end_date: Optional[str] = None     # 'YYYY-MM-DD'
+) -> BacktestResult
+```
+
+### BacktestResult
+
+```python
+result.daily_perf          # DataFrame: 每日绩效数据
+result.trade_logs          # DataFrame: 交易日志
+result.config              # BacktestConfig: 回测配置
+result.total_return        # float: 总收益率
+result.annualized_return   # float: 年化收益率
+result.max_drawdown        # float: 最大回撤
+result.sharpe_ratio        # float: 夏普比率
+result.num_trades          # int: 总交易次数
+result.num_buy_trades      # int: 买入次数
+result.num_sell_trades     # int: 卖出次数
+```
+
 ## 最佳实践
+
+### 数据生成
 
 1. **配置管理**：针对不同测试场景创建多个配置文件
 2. **数据版本控制**：使用相同的 seed 和配置可重现数据
 3. **性能优化**：大规模数据生成时，考虑并行处理多个 ticker
 4. **数据清理**：定期清理过期的 mock 数据
+
+### 回测优化
+
+1. **参数调优**：使用网格搜索或贝叶斯优化调整 `buy_threshold`、`liquidity_ratio` 等参数
+2. **多标的对比**：并行回测多个 ticker，对比策略表现
+3. **日志分析**：设置 `logging.DEBUG` 级别查看详细的交易执行信息
+4. **结果可视化**：使用 `result.daily_perf` 绘制收益曲线和回撤图
 
 ## License
 
