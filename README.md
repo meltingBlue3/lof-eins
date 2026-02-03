@@ -93,10 +93,14 @@ df = loader.load_bundle('161005')
 # 支持日期过滤
 df_filtered = loader.load_bundle('161005', start_date='2024-03-01', end_date='2024-06-30')
 
-# 加载费率配置
+# 加载费率配置（方式1：直接调用）
 fees = loader.load_fees('161005')
 print(fees)
 # Output: {'fee_rate_tier_1': 0.015, 'fee_limit_1': 500000.0, ...}
+
+# 方式2：从 DataFrame.attrs 获取（load_bundle 自动附加）
+df = loader.load_bundle('161005')
+print(df.attrs['redeem_fee_7d'])  # 0.015
 ```
 
 ### DataLoader 返回的 DataFrame 结构
@@ -120,6 +124,7 @@ print(fees)
 3. **预计算溢价率**：自动计算并验证 `premium_rate = (close - nav) / nav`
 4. **数据清洗**：使用 `ffill()` 自动处理缺失值
 5. **费率缓存**：费率配置在首次加载后缓存，提高性能
+6. **费率附加**：费率配置自动附加到 DataFrame.attrs，可通过 `df.attrs['redeem_fee_7d']` 访问
 
 ## 配置参数说明
 

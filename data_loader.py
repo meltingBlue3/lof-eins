@@ -53,6 +53,7 @@ class DataLoader:
         Returns:
             DataFrame indexed by date with columns:
             open, high, low, close, volume, nav, premium_rate, daily_limit
+            Fee configuration is attached as DataFrame.attrs.
             
         Raises:
             FileNotFoundError: If market or NAV data files don't exist.
@@ -95,6 +96,10 @@ class DataLoader:
         # Apply date filtering if specified
         if start_date is not None or end_date is not None:
             df = df.loc[start_date:end_date]
+        
+        # Attach fee configuration as DataFrame attributes
+        fees = self.load_fees(ticker)
+        df.attrs.update(fees)
         
         return df
     
