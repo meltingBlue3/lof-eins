@@ -2,7 +2,13 @@
 Simple script to run the mock data generator.
 """
 
-from mock_data_generator import MockConfig, generate_mock_data
+import sys
+from pathlib import Path
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.data.generator import MockConfig, generate_mock_data
 
 if __name__ == "__main__":
     # Use default configuration

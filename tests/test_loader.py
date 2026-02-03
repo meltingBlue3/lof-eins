@@ -1,7 +1,13 @@
+import sys
+from pathlib import Path
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import pandas as pd
 import sqlite3
 import os
-from data_loader import DataLoader  # 假设你的类在 data_loader.py 中
+from src.data.loader import DataLoader
 
 # ================= 配置 =================
 TICKER = '161005'  # 确保这个 ticker 在你的 mock 数据里存在

@@ -1,3 +1,9 @@
+import sys
+from pathlib import Path
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import pandas as pd
 import sqlite3
 import plotly.graph_objects as go

@@ -8,11 +8,23 @@
 
 ```
 lof-eins/
-├── mock_data_generator/          # 核心模块
+├── src/                          # 主源代码包
 │   ├── __init__.py
-│   ├── config.py                 # 配置类 (MockConfig)
-│   ├── generators.py             # 数据生成器
-│   └── main.py                   # 主入口
+│   ├── data/                     # 数据模块
+│   │   ├── __init__.py
+│   │   ├── loader.py             # 数据加载器 (DataLoader)
+│   │   └── generator/            # Mock 数据生成器
+│   │       ├── __init__.py
+│   │       ├── config.py         # 配置类 (MockConfig)
+│   │       ├── generators.py     # 数据生成器
+│   │       └── main.py           # 主入口
+│   └── engine/                   # 回测引擎（待实现）
+│       └── __init__.py
+├── scripts/                      # 可执行脚本
+│   ├── generate_mock.py          # 生成 mock 数据
+│   └── inspect_data.py           # 数据可视化验证
+├── tests/                        # 测试文件
+│   └── test_loader.py            # DataLoader 测试
 ├── data/mock/                    # 生成的数据目录
 │   ├── market/                   # 市场数据 (OHLCV)
 │   │   └── {ticker}.parquet
@@ -21,10 +33,6 @@ lof-eins/
 │   └── config/                   # 配置数据
 │       ├── fees.csv              # 费率配置
 │       └── fund_status.db        # 限购事件 (SQLite)
-├── data_loader.py                # 数据加载器
-├── run_generator.py              # 运行脚本
-├── inspect_data.py               # 数据可视化验证脚本
-├── test_data_loader.py           # DataLoader 测试脚本
 └── requirements.txt
 ```
 
@@ -44,7 +52,7 @@ pip install -r requirements.txt
 ### 使用默认配置
 
 ```python
-from mock_data_generator import MockConfig, generate_mock_data
+from src.data.generator import MockConfig, generate_mock_data
 
 # 使用默认配置生成数据
 generate_mock_data()
@@ -53,13 +61,13 @@ generate_mock_data()
 或者直接运行：
 
 ```bash
-python run_generator.py
+python scripts/generate_mock.py
 ```
 
 ### 自定义配置
 
 ```python
-from mock_data_generator import MockConfig, generate_mock_data
+from src.data.generator import MockConfig, generate_mock_data
 
 # 自定义配置
 config = MockConfig(
@@ -82,7 +90,7 @@ generate_mock_data(config)
 生成数据后，使用 `DataLoader` 类读取和对齐所有数据源：
 
 ```python
-from data_loader import DataLoader
+from src.data.loader import DataLoader
 
 # 初始化 DataLoader
 loader = DataLoader(data_dir='./data/mock')
@@ -254,7 +262,7 @@ stateDiagram-v2
 运行可视化验证脚本检查生成的数据质量：
 
 ```bash
-python inspect_data.py
+python scripts/inspect_data.py
 ```
 
 该脚本会创建一个交互式仪表板，包含以下可视化内容：
