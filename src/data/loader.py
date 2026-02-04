@@ -7,7 +7,7 @@ unified data access for backtesting.
 
 import sqlite3
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 
 import pandas as pd
 import numpy as np
@@ -107,6 +107,16 @@ class DataLoader:
         
         return df
     
+    # Default fee configuration for LOF funds
+    DEFAULT_FEES: Dict[str, float] = {
+        'fee_rate_tier_1': 0.015,
+        'fee_limit_1': 500000.0,
+        'fee_rate_tier_2': 0.01,
+        'fee_limit_2': 2000000.0,
+        'fee_fixed': 1000.0,
+        'redeem_fee_7d': 0.015
+    }
+    
     def load_fees(self, ticker: str) -> Dict[str, float]:
         """Load fee configuration for a specific ticker.
         
@@ -124,14 +134,15 @@ class DataLoader:
                 'redeem_fee_7d': float
             }
             
-        Raises:
-            ValueError: If ticker not found in fee configuration.
+        Note:
+            Returns default fees if ticker not found in configuration.
         """
         # Load and cache fees CSV on first call
         if self._fees_cache is None:
             fees_path = self.data_dir / 'config' / 'fees.csv'
             if not fees_path.exists():
-                raise FileNotFoundError(f"Fee configuration not found: {fees_path}")
+                # No fee config file, use defaults for all tickers
+                return self.DEFAULT_FEES.copy()
             self._fees_cache = pd.read_csv(fees_path)
             # Convert ticker column to string for consistent comparison
             self._fees_cache['ticker'] = self._fees_cache['ticker'].astype(str)
@@ -140,7 +151,8 @@ class DataLoader:
         ticker_fees = self._fees_cache[self._fees_cache['ticker'] == str(ticker)]
         
         if ticker_fees.empty:
-            raise ValueError(f"Ticker '{ticker}' not found in fee configuration")
+            # Ticker not in config, return defaults
+            return self.DEFAULT_FEES.copy()
         
         # Convert to dictionary (first row only)
         fee_dict = ticker_fees.iloc[0].to_dict()
@@ -213,3 +225,22 @@ class DataLoader:
             daily_limits.loc[mask] = max_amount
         
         return daily_limits
+    
+    def list_available_tickers(self) -> List[str]:
+        """Discover all tickers available in the data directory.
+        
+        Scans both market and nav directories for parquet files and returns
+        only tickers that have both market AND nav data.
+        
+        Returns:
+            Sorted list of ticker codes available in the data directory.
+        """
+        market_dir = self.data_dir / 'market'
+        nav_dir = self.data_dir / 'nav'
+        
+        market_tickers = {f.stem for f in market_dir.glob('*.parquet')}
+        nav_tickers = {f.stem for f in nav_dir.glob('*.parquet')}
+        
+        # Only return tickers that have both market and nav data
+        valid_tickers = market_tickers & nav_tickers
+        return sorted(valid_tickers)

@@ -1,4 +1,6 @@
-pandas>=2.0.0
-numpy>=1.24.0
+numpy==1.26.4
 pyarrow>=14.0.0
 PyYAML>=6.0
+jqdatasdk==1.9.8
+python-dotenv>=1.0.0
+plotly>=5.0.0

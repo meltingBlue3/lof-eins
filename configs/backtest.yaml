@@ -7,7 +7,7 @@
 initial_cash: 300000.0
 
 # Minimum premium rate to trigger buy signal (2% = 0.02)
-buy_threshold: 0.02
+buy_threshold: 0.017
 
 # Fraction of daily volume that can be traded (10% = 0.1)
 liquidity_ratio: 0.1
@@ -28,10 +28,17 @@ risk_free_rate: 0.02
 # Runtime parameters (not part of BacktestConfig, read by run_backtest.py)
 # ===========================
 
+# Data source directory (relative or absolute path)
+# - ./data/mock        : Mock data for testing
+# - ./data/real_all_lof: Real data downloaded from JoinQuant
+data_dir: ./data/real_all_lof
+
 # Tickers to run backtest on
-tickers:
-  - "161005"
-  - "162411"
-  - "161725"
-  - "501018"
-  - "160216"
+# Options:
+# - "all": Auto-discover all tickers from data_dir
+# - List of ticker codes: Run on specific tickers only
+# tickers: all
+# tickers:
+#   - "161810"
+#   - "163417"
+tickers: all
