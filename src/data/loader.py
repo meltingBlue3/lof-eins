@@ -73,6 +73,10 @@ class DataLoader:
         # Set date as index for both DataFrames
         df_market = df_market.set_index('date')
         df_nav = df_nav.set_index('date')
+
+        # Ensure index is DatetimeIndex for proper matching in backtest
+        df_market.index = pd.to_datetime(df_market.index)
+        df_nav.index = pd.to_datetime(df_nav.index)
         
         # Merge market and NAV data on date index
         df = pd.merge(
