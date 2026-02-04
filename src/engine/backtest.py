@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date
 from functools import cached_property
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -52,14 +52,15 @@ def calculate_subscription_fee(amount: float, attrs: Dict[str, Any]) -> float:
 class BacktestResult:
     """Encapsulates backtest outputs with performance metrics.
     
+    Supports both single-ticker and multi-ticker backtests.
+    
     Attributes:
         daily_perf: Daily performance DataFrame with columns:
-            - total_assets: Total account value
+            - total_assets: Total account value (cash + all positions)
             - cash: Cash balance
-            - positions_value: Value of all positions
-            - nav: Fund NAV
-            - price: Fund closing price
-        trade_logs: DataFrame of all executed trades.
+            - positions_value: Value of all positions across all tickers
+        trade_logs: DataFrame of all executed trades with columns:
+            - date, action, ticker, shares, price, amount, fee, net_amount
         config: The BacktestConfig used for this run.
     """
     
@@ -236,37 +237,96 @@ class BacktestEngine:
         self.strategy = strategy
         self.data_loader = data_loader or DataLoader()
     
+    def _load_multi_data(
+        self,
+        tickers: List[str],
+        start_date: Optional[str],
+        end_date: Optional[str]
+    ) -> Tuple[Dict[str, pd.DataFrame], pd.DatetimeIndex]:
+        """Load data for multiple tickers and align dates.
+        
+        Args:
+            tickers: List of fund ticker symbols.
+            start_date: Optional start date filter (YYYY-MM-DD).
+            end_date: Optional end date filter (YYYY-MM-DD).
+            
+        Returns:
+            Tuple of:
+            - Dict mapping ticker to DataFrame with market data
+            - DatetimeIndex of aligned trading days (intersection)
+        """
+        all_data: Dict[str, pd.DataFrame] = {}
+        
+        for ticker in tickers:
+            df = self.data_loader.load_bundle(ticker, start_date, end_date)
+            
+            # Pre-compute MA5 volume
+            if self.config.use_ma5_liquidity:
+                df['ma5_volume'] = df['volume'].rolling(5, min_periods=1).mean()
+            else:
+                df['ma5_volume'] = df['volume']
+            
+            # Add ticker column
+            df['ticker'] = ticker
+            
+            all_data[ticker] = df
+        
+        # Find intersection of all trading days
+        if not all_data:
+            return {}, pd.DatetimeIndex([])
+        
+        common_dates = None
+        for df in all_data.values():
+            if common_dates is None:
+                common_dates = set(df.index)
+            else:
+                common_dates = common_dates.intersection(set(df.index))
+        
+        # Sort dates
+        aligned_dates = pd.DatetimeIndex(sorted(common_dates))
+        
+        return all_data, aligned_dates
+    
     def run(
         self,
-        ticker: str,
+        tickers: Union[str, List[str]],
         start_date: Optional[str] = None,
         end_date: Optional[str] = None
     ) -> BacktestResult:
-        """Execute backtest for a single ticker.
+        """Execute backtest for one or more tickers with unified capital pool.
+        
+        When multiple tickers are provided:
+        - Uses a single shared account (unified capital pool)
+        - Can hold positions in multiple funds simultaneously
+        - Buy signals are sorted by premium_rate (descending) and executed greedily
         
         Args:
-            ticker: Fund ticker symbol.
+            tickers: Single ticker string or list of ticker symbols.
             start_date: Optional start date filter (YYYY-MM-DD).
             end_date: Optional end date filter (YYYY-MM-DD).
             
         Returns:
             BacktestResult with performance metrics and trade logs.
         """
-        # Load data
-        df = self.data_loader.load_bundle(ticker, start_date, end_date)
-        
-        # Pre-compute MA5 volume
-        if self.config.use_ma5_liquidity:
-            df['ma5_volume'] = df['volume'].rolling(5, min_periods=1).mean()
+        # Normalize tickers to list
+        if isinstance(tickers, str):
+            ticker_list = [tickers]
         else:
-            df['ma5_volume'] = df['volume']
+            ticker_list = list(tickers)
         
-        # Add ticker column if not present
-        if 'ticker' not in df.columns:
-            df['ticker'] = ticker
+        # Load all data and align dates
+        all_data, aligned_dates = self._load_multi_data(ticker_list, start_date, end_date)
+        
+        if not all_data or len(aligned_dates) == 0:
+            logger.warning("No data available for tickers: %s", ticker_list)
+            return BacktestResult(
+                daily_perf=pd.DataFrame(),
+                trade_logs=pd.DataFrame(),
+                config=self.config
+            )
         
         # Extract trading days as date objects
-        trading_days: List[date] = [d.date() for d in df.index]
+        trading_days: List[date] = [d.date() for d in aligned_dates]
         
         # Initialize account
         account = Account(cash=self.config.initial_cash)
@@ -276,22 +336,22 @@ class BacktestEngine:
         trade_records: List[Dict[str, Any]] = []
         
         # Main backtest loop
-        for idx, (timestamp, row) in enumerate(df.iterrows()):
+        for timestamp in aligned_dates:
             current_date = timestamp.date()
             
             # Step 1: Settle T+2 positions
             account.update_date(current_date)
             
-            # Step 2: Generate signals
-            signals = self.strategy.generate_signals(
-                row=row,
-                positions=account.positions.copy(),
-                config=self.config
-            )
-            
-            # Step 3: Execute SELL signals first (T+0 cash)
-            for signal in signals:
-                if signal.action == 'sell':
+            # Step 2: SELL Phase - sell all positions that have available shares
+            for ticker in ticker_list:
+                if ticker not in all_data or timestamp not in all_data[ticker].index:
+                    continue
+                
+                row = all_data[ticker].loc[timestamp]
+                available_shares = account.get_available_shares(ticker)
+                
+                if available_shares > 0:
+                    signal = Signal(action='sell', ticker=ticker, amount=float('inf'))
                     trade = self._execute_sell(
                         account=account,
                         signal=signal,
@@ -301,29 +361,62 @@ class BacktestEngine:
                     if trade:
                         trade_records.append(trade)
             
-            # Step 4: Execute BUY signals
-            for signal in signals:
-                if signal.action == 'buy':
-                    trade = self._execute_buy(
-                        account=account,
-                        signal=signal,
-                        row=row,
-                        df_attrs=df.attrs,
-                        trading_days=trading_days,
-                        current_date=current_date
-                    )
-                    if trade:
-                        trade_records.append(trade)
+            # Step 3: BUY Phase - collect candidates, sort by premium_rate, buy greedily
+            buy_candidates = []
             
-            # Step 5: Record daily performance
-            prices = {ticker: row['close']}
+            for ticker in ticker_list:
+                if ticker not in all_data or timestamp not in all_data[ticker].index:
+                    continue
+                
+                row = all_data[ticker].loc[timestamp]
+                premium_rate = row['premium_rate']
+                daily_limit = row['daily_limit']
+                
+                # Filter: must exceed threshold and have positive limit
+                if premium_rate > self.config.buy_threshold and daily_limit > 0:
+                    buy_candidates.append({
+                        'ticker': ticker,
+                        'premium_rate': premium_rate,
+                        'row': row,
+                        'attrs': all_data[ticker].attrs
+                    })
+            
+            # Sort by premium_rate descending (highest first)
+            buy_candidates.sort(key=lambda x: x['premium_rate'], reverse=True)
+            
+            # Greedy buy: iterate until cash exhausted
+            for candidate in buy_candidates:
+                if account.cash <= 0:
+                    break
+                
+                signal = Signal(
+                    action='buy',
+                    ticker=candidate['ticker'],
+                    amount=float('inf')
+                )
+                trade = self._execute_buy(
+                    account=account,
+                    signal=signal,
+                    row=candidate['row'],
+                    df_attrs=candidate['attrs'],
+                    trading_days=trading_days,
+                    current_date=current_date
+                )
+                if trade:
+                    trade_records.append(trade)
+            
+            # Step 4: Record daily performance
+            # Collect current prices for all tickers
+            prices: Dict[str, float] = {}
+            for ticker in ticker_list:
+                if ticker in all_data and timestamp in all_data[ticker].index:
+                    prices[ticker] = all_data[ticker].loc[timestamp, 'close']
+            
             daily_records.append({
                 'date': timestamp,
                 'total_assets': account.get_total_value(prices),
                 'cash': account.cash,
                 'positions_value': account.get_positions_value(prices),
-                'nav': row['nav'],
-                'price': row['close'],
             })
         
         # Build result DataFrames
