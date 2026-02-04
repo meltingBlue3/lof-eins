@@ -27,6 +27,9 @@ lof-eins/
 │       ├── __init__.py
 │       ├── account.py            # 账户管理 (T+2 结算)
 │       └── backtest.py           # 回测执行引擎
+├── configs/                      # YAML 配置文件目录
+│   ├── backtest.yaml             # 回测配置示例
+│   └── mock.yaml                 # Mock 数据生成配置示例
 ├── scripts/                      # 可执行脚本
 │   ├── generate_mock.py          # 生成 mock 数据
 │   └── inspect_data.py           # 数据可视化验证
@@ -53,32 +56,33 @@ pip install -r requirements.txt
 - `pandas >= 2.0.0`
 - `numpy >= 1.24.0`
 - `pyarrow >= 14.0.0`
+- `PyYAML >= 6.0`
 
 ## 快速开始
 
 ### 1. 生成 Mock 数据
 
-#### 使用默认配置
+#### 方式 1: 使用 YAML 配置文件（推荐）
 
-```python
-from src.data.generator import MockConfig, generate_mock_data
-
-# 使用默认配置生成数据
-generate_mock_data()
-```
-
-或者直接运行：
+编辑 `configs/mock.yaml` 文件自定义参数，然后运行：
 
 ```bash
+# 使用默认配置文件 (configs/mock.yaml)
 python scripts/generate_mock.py
+
+# 使用自定义配置文件
+python scripts/generate_mock.py --config configs/my_mock.yaml
 ```
 
-#### 自定义配置
+#### 方式 2: 使用 Python 代码配置
 
 ```python
 from src.data.generator import MockConfig, generate_mock_data
 
-# 自定义配置
+# 从 YAML 文件加载配置
+config = MockConfig.from_yaml("configs/mock.yaml")
+
+# 或者直接在代码中配置
 config = MockConfig(
     tickers=['161005', '162411', '161725'],
     start_date="2024-01-01",
@@ -91,10 +95,28 @@ config = MockConfig(
     spike_probability=0.04             # 4% 概率溢价飙升
 )
 
+# 生成数据
 generate_mock_data(config)
+
+# 可选：将配置保存到文件
+config.to_yaml("configs/my_saved_config.yaml")
 ```
 
 ### 2. 运行回测
+
+#### 方式 1: 使用 YAML 配置文件（推荐）
+
+编辑 `configs/backtest.yaml` 文件自定义参数，然后运行：
+
+```bash
+# 使用默认配置文件 (configs/backtest.yaml)
+python run_backtest.py
+
+# 使用自定义配置文件
+python run_backtest.py --config configs/my_backtest.yaml
+```
+
+#### 方式 2: 使用 Python 代码配置
 
 ```python
 import logging
@@ -103,7 +125,10 @@ from src import BacktestConfig, BacktestEngine, SimpleLOFStrategy, DataLoader
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 
-# 回测配置
+# 从 YAML 文件加载配置
+config = BacktestConfig.from_yaml("configs/backtest.yaml")
+
+# 或者直接在代码中配置
 config = BacktestConfig(
     initial_cash=300_000.0,     # 初始资金
     buy_threshold=0.02,         # 2% 溢价率触发买入
@@ -119,8 +144,8 @@ strategy = SimpleLOFStrategy()
 loader = DataLoader(data_dir='./data/mock')
 engine = BacktestEngine(config=config, strategy=strategy, data_loader=loader)
 
-# 运行回测
-result = engine.run(ticker='161005')
+# 运行回测（可指定 tickers）
+result = engine.run(tickers=['161005', '162411', '161725', '501018', '160216'])
 
 # 打印结果
 print(result)
@@ -287,6 +312,86 @@ print(df.attrs['redeem_fee_7d'])  # 0.015
 4. **数据清洗**：使用 `ffill()` 自动处理缺失值
 5. **费率缓存**：费率配置在首次加载后缓存，提高性能
 6. **费率附加**：费率配置自动附加到 DataFrame.attrs，可通过 `df.attrs['redeem_fee_7d']` 访问
+
+## 配置文件管理
+
+系统支持 YAML 格式的外部配置文件，方便进行参数调整和测试场景管理。
+
+### 配置文件位置
+
+- **回测配置**: `configs/backtest.yaml`
+- **Mock 数据生成配置**: `configs/mock.yaml`
+
+### 配置文件示例
+
+**configs/backtest.yaml**:
+```yaml
+initial_cash: 300000.0
+buy_threshold: 0.02
+liquidity_ratio: 0.1
+commission_rate: 0.0003
+risk_mode: fixed
+use_ma5_liquidity: true
+risk_free_rate: 0.02
+
+# 回测标的（非 BacktestConfig 字段）
+tickers:
+  - "161005"
+  - "162411"
+  - "161725"
+```
+
+**configs/mock.yaml**:
+```yaml
+tickers:
+  - "161005"
+  - "162411"
+start_date: "2024-01-01"
+end_date: "2024-12-31"
+initial_nav: 2.0
+premium_volatility: 0.01
+limit_trigger_threshold: 0.07
+limit_release_threshold: 0.03
+consecutive_days: 1
+```
+
+### 配置文件 API
+
+两个配置类都支持从 YAML 加载和保存：
+
+```python
+from src import BacktestConfig
+from src.data.generator import MockConfig
+
+# 加载配置
+backtest_config = BacktestConfig.from_yaml("configs/backtest.yaml")
+mock_config = MockConfig.from_yaml("configs/mock.yaml")
+
+# 保存配置
+backtest_config.to_yaml("configs/my_backtest.yaml")
+mock_config.to_yaml("configs/my_mock.yaml")
+```
+
+### 多场景测试建议
+
+针对不同测试场景创建多个配置文件：
+
+```
+configs/
+├── backtest.yaml              # 默认配置
+├── backtest_aggressive.yaml   # 激进策略
+├── backtest_conservative.yaml # 保守策略
+├── mock.yaml                  # 默认数据生成
+├── mock_high_volatility.yaml  # 高波动场景
+└── mock_frequent_limits.yaml  # 频繁限购场景
+```
+
+然后使用 `--config` 参数运行不同场景：
+
+```bash
+python run_backtest.py --config configs/backtest_aggressive.yaml
+python scripts/generate_mock.py --config configs/mock_high_volatility.yaml
+```
 
 ## 配置参数说明
 
@@ -486,8 +591,9 @@ Configuration:
 ## 设计特点
 
 ### 1. 配置驱动
-- 所有参数通过 `MockConfig` 配置，无硬编码
-- 支持灵活的参数调整和场景模拟
+- 所有参数通过 YAML 配置文件管理，支持外部化配置
+- 配置类（`MockConfig`、`BacktestConfig`）支持 `from_yaml()` 和 `to_yaml()` 方法
+- 支持灵活的参数调整和多场景测试
 
 ### 2. 高仿真度
 - NAV 使用几何布朗运动，符合金融资产价格特征
@@ -596,19 +702,27 @@ result.num_sell_trades     # int: 卖出次数
 
 ## 最佳实践
 
+### 配置管理
+
+1. **使用 YAML 配置文件**：推荐使用 YAML 文件而非硬编码配置，便于版本控制和参数对比
+2. **场景化配置**：为不同测试场景创建专门的配置文件（如 `backtest_aggressive.yaml`、`mock_high_volatility.yaml`）
+3. **配置版本化**：将配置文件纳入 Git 版本控制，记录参数变更历史
+4. **配置文档化**：在 YAML 文件中添加注释说明参数含义和调整原因
+
 ### 数据生成
 
-1. **配置管理**：针对不同测试场景创建多个配置文件
+1. **配置复用**：使用 `to_yaml()` 保存成功的配置供后续复用
 2. **数据版本控制**：使用相同的 seed 和配置可重现数据
 3. **性能优化**：大规模数据生成时，考虑并行处理多个 ticker
 4. **数据清理**：定期清理过期的 mock 数据
 
 ### 回测优化
 
-1. **参数调优**：使用网格搜索或贝叶斯优化调整 `buy_threshold`、`liquidity_ratio` 等参数
-2. **多标的对比**：并行回测多个 ticker，对比策略表现
-3. **日志分析**：设置 `logging.DEBUG` 级别查看详细的交易执行信息
-4. **结果可视化**：使用 `result.daily_perf` 绘制收益曲线和回撤图
+1. **参数调优**：创建多个配置文件进行网格搜索，调整 `buy_threshold`、`liquidity_ratio` 等参数
+2. **批量测试**：使用脚本循环调用不同配置文件，自动化测试流程
+3. **多标的对比**：在配置文件中指定不同的 tickers 列表，对比策略表现
+4. **日志分析**：设置 `logging.DEBUG` 级别查看详细的交易执行信息
+5. **结果可视化**：使用 `result.daily_perf` 绘制收益曲线和回撤图
 
 ## License
 
