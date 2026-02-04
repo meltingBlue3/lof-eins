@@ -2,8 +2,11 @@
 Central configuration management for LOF Backtesting Engine.
 """
 
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, fields, asdict
+from pathlib import Path
+from typing import Literal, Union
+
+import yaml
 
 
 @dataclass
@@ -44,3 +47,40 @@ class BacktestConfig:
         
         if self.risk_free_rate < 0:
             raise ValueError(f"risk_free_rate must be non-negative, got {self.risk_free_rate}")
+
+    @classmethod
+    def from_yaml(cls, path: Union[str, Path]) -> "BacktestConfig":
+        """Load configuration from a YAML file.
+        
+        Args:
+            path: Path to the YAML configuration file.
+            
+        Returns:
+            BacktestConfig instance with values from the file.
+            
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            yaml.YAMLError: If the file is not valid YAML.
+            ValueError: If configuration values are invalid.
+        """
+        path = Path(path)
+        with open(path, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f) or {}
+        
+        # Filter to only valid BacktestConfig fields
+        valid_fields = {field.name for field in fields(cls)}
+        filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+        
+        return cls(**filtered_data)
+
+    def to_yaml(self, path: Union[str, Path]) -> None:
+        """Save configuration to a YAML file.
+        
+        Args:
+            path: Path to save the YAML configuration file.
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(path, 'w', encoding='utf-8') as f:
+            yaml.dump(asdict(self), f, default_flow_style=False, allow_unicode=True, sort_keys=False)

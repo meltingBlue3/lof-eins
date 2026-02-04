@@ -2,8 +2,11 @@
 Configuration module for LOF Mock Data Generator.
 """
 
-from dataclasses import dataclass, field
-from typing import List
+from dataclasses import dataclass, field, fields, asdict
+from pathlib import Path
+from typing import List, Union
+
+import yaml
 
 
 @dataclass
@@ -31,13 +34,13 @@ class MockConfig:
     )
     start_date: str = "2024-01-01"
     end_date: str = "2024-12-31"
-    initial_nav: float = 1.0
-    premium_volatility: float = 0.05
-    limit_trigger_threshold: float = 0.15
-    limit_release_threshold: float = 0.05
-    consecutive_days: int = 2
+    initial_nav: float = 2.0
+    premium_volatility: float = 0.01
+    limit_trigger_threshold: float = 0.07
+    limit_release_threshold: float = 0.03
+    consecutive_days: int = 1
     spike_probability: float = 0.04
-    nav_drift: float = 0.0003  # ~7.5% annualized
+    nav_drift: float = -0.0005  # ~7.5% annualized
     nav_volatility: float = 0.015  # ~24% annualized
     limit_max_amount: float = 100.0
     normal_max_amount: float = 1_000_000.0
@@ -58,3 +61,40 @@ class MockConfig:
         
         if self.initial_nav <= 0:
             raise ValueError(f"initial_nav must be positive, got {self.initial_nav}")
+
+    @classmethod
+    def from_yaml(cls, path: Union[str, Path]) -> "MockConfig":
+        """Load configuration from a YAML file.
+        
+        Args:
+            path: Path to the YAML configuration file.
+            
+        Returns:
+            MockConfig instance with values from the file.
+            
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            yaml.YAMLError: If the file is not valid YAML.
+            ValueError: If configuration values are invalid.
+        """
+        path = Path(path)
+        with open(path, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f) or {}
+        
+        # Filter to only valid MockConfig fields
+        valid_fields = {field.name for field in fields(cls)}
+        filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+        
+        return cls(**filtered_data)
+
+    def to_yaml(self, path: Union[str, Path]) -> None:
+        """Save configuration to a YAML file.
+        
+        Args:
+            path: Path to save the YAML configuration file.
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(path, 'w', encoding='utf-8') as f:
+            yaml.dump(asdict(self), f, default_flow_style=False, allow_unicode=True, sort_keys=False)

@@ -1,0 +1,37 @@
+# LOF Backtest Configuration
+# ===========================
+# This file contains the configuration parameters for running backtests.
+# Modify values below to test different strategies and parameters.
+
+# Initial capital (CNY)
+initial_cash: 300000.0
+
+# Minimum premium rate to trigger buy signal (2% = 0.02)
+buy_threshold: 0.02
+
+# Fraction of daily volume that can be traded (10% = 0.1)
+liquidity_ratio: 0.1
+
+# Trading commission rate for sell transactions (0.03% = 0.0003)
+commission_rate: 0.0003
+
+# Position sizing mode: 'fixed' uses available cash, 'infinite' ignores cash constraints
+risk_mode: fixed
+
+# Use MA5 volume for liquidity calculation
+use_ma5_liquidity: true
+
+# Annual risk-free rate for Sharpe ratio calculation (2% = 0.02)
+risk_free_rate: 0.02
+
+# ===========================
+# Runtime parameters (not part of BacktestConfig, read by run_backtest.py)
+# ===========================
+
+# Tickers to run backtest on
+tickers:
+  - "161005"
+  - "162411"
+  - "161725"
+  - "501018"
+  - "160216"

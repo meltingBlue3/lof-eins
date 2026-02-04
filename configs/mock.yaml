@@ -1,0 +1,46 @@
+# LOF Mock Data Generator Configuration
+# ======================================
+# This file contains the configuration parameters for generating mock data.
+# Modify values below to generate different test scenarios.
+
+# Fund ticker symbols to generate data for
+tickers:
+  - "161005"
+  - "162411"
+  - "161725"
+  - "501018"
+  - "160216"
+
+# Date range for data generation (YYYY-MM-DD format)
+start_date: "2024-01-01"
+end_date: "2024-12-31"
+
+# Initial Net Asset Value for each fund
+initial_nav: 2.0
+
+# Volatility coefficient for premium rate fluctuations
+premium_volatility: 0.01
+
+# Premium rate threshold to trigger purchase limit (7% = 0.07)
+limit_trigger_threshold: 0.07
+
+# Premium rate threshold to release purchase limit (3% = 0.03)
+limit_release_threshold: 0.03
+
+# Number of consecutive days above threshold to trigger limit
+consecutive_days: 1
+
+# Probability of premium rate spike event on any given day (4% = 0.04)
+spike_probability: 0.04
+
+# Daily drift coefficient for NAV random walk (annualized return)
+nav_drift: -0.0005
+
+# Daily volatility for NAV random walk (annualized)
+nav_volatility: 0.015
+
+# Maximum purchase amount during limit period (CNY)
+limit_max_amount: 100.0
+
+# Maximum purchase amount during normal period (CNY)
+normal_max_amount: 1000000.0
