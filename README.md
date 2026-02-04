@@ -14,6 +14,7 @@ lof-eins/
 │   ├── data/                     # 数据模块
 │   │   ├── __init__.py
 │   │   ├── loader.py             # 数据加载器 (DataLoader)
+│   │   ├── downloader.py         # 真实数据下载器 (RealDataDownloader)
 │   │   └── generator/            # Mock 数据生成器
 │   │       ├── __init__.py
 │   │       ├── config.py         # 配置类 (MockConfig)
@@ -31,18 +32,23 @@ lof-eins/
 │   ├── backtest.yaml             # 回测配置示例
 │   └── mock.yaml                 # Mock 数据生成配置示例
 ├── scripts/                      # 可执行脚本
+│   ├── download_lof.py           # 下载真实 LOF 数据
 │   ├── generate_mock.py          # 生成 mock 数据
 │   └── inspect_data.py           # 数据可视化验证
 ├── tests/                        # 测试文件
 │   └── test_loader.py            # DataLoader 测试
-├── data/mock/                    # 生成的数据目录
-│   ├── market/                   # 市场数据 (OHLCV)
-│   │   └── {ticker}.parquet
-│   ├── nav/                      # NAV 数据
-│   │   └── {ticker}.parquet
-│   └── config/                   # 配置数据
-│       ├── fees.csv              # 费率配置
-│       └── fund_status.db        # 限购事件 (SQLite)
+├── data/                         # 数据目录
+│   ├── real_all_lof/             # 真实数据（从 JoinQuant 下载）
+│   │   ├── market/               # 市场数据 (OHLCV)
+│   │   │   └── {ticker}.parquet
+│   │   ├── nav/                  # NAV 数据
+│   │   │   └── {ticker}.parquet
+│   │   └── config/               # 配置数据
+│   │       ├── fees.csv          # 费率配置
+│   │       └── fund_status.db    # 限购事件 (SQLite)
+│   └── mock/                     # Mock 数据（生成的测试数据）
+│       └── (同上结构)
+├── .env                          # 环境配置 (JoinQuant 凭证)
 └── requirements.txt
 ```
 
@@ -57,10 +63,68 @@ pip install -r requirements.txt
 - `numpy >= 1.24.0`
 - `pyarrow >= 14.0.0`
 - `PyYAML >= 6.0`
+- `jqdatasdk >= 1.8.0` (仅用于下载真实数据)
+- `python-dotenv >= 0.19.0` (仅用于环境配置)
 
 ## 快速开始
 
-### 1. 生成 Mock 数据
+### 1. 准备数据
+
+系统支持两种数据源：
+
+#### 选项 A: 下载真实 LOF 数据（推荐）
+
+从 JoinQuant 下载所有 LOF 基金的真实市场数据和净值数据。
+
+**1. 配置 JoinQuant 账户**
+
+创建 `.env` 文件在项目根目录：
+
+```bash
+JQ_USERNAME=your_username
+JQ_PASSWORD=your_password
+```
+
+**2. 运行下载脚本**
+
+```bash
+# 使用默认配置（最近2个月数据）
+python scripts/download_lof.py
+
+# 自定义日期范围
+python scripts/download_lof.py --start 2024-01-01 --end 2024-12-31
+
+# 自定义输出目录
+python scripts/download_lof.py --output ./data/custom
+
+# 调整批量大小（避免超时）
+python scripts/download_lof.py --batch-size 30
+```
+
+**特性**：
+- 自动发现所有 LOF 基金（通常有 400+ 个）
+- 智能分批下载，避免 API 超时
+- 自动处理限购事件（基于公告）
+- 下载真实费率配置
+- 数据输出结构与 `DataLoader` 完全兼容
+
+**输出目录结构**：
+```
+data/real_all_lof/
+├── market/          # 市场数据 (OHLCV)
+│   ├── 160216.parquet
+│   ├── 161005.parquet
+│   └── ...
+├── nav/             # 净值数据
+│   ├── 160216.parquet
+│   ├── 161005.parquet
+│   └── ...
+└── config/
+    ├── fees.csv         # 费率配置
+    └── fund_status.db   # 限购事件 (SQLite)
+```
+
+#### 选项 B: 生成 Mock 数据（用于测试）
 
 #### 方式 1: 使用 YAML 配置文件（推荐）
 
@@ -106,7 +170,25 @@ config.to_yaml("configs/my_saved_config.yaml")
 
 #### 方式 1: 使用 YAML 配置文件（推荐）
 
-编辑 `configs/backtest.yaml` 文件自定义参数，然后运行：
+编辑 `configs/backtest.yaml` 文件自定义参数：
+
+```yaml
+# 数据源目录
+data_dir: ./data/real_all_lof  # 真实数据
+# data_dir: ./data/mock         # Mock 数据
+
+# 回测标的（支持三种模式）
+tickers: all  # 自动发现所有可用的 ticker
+# tickers:    # 或指定具体列表
+#   - "161005"
+#   - "162411"
+
+# 其他配置参数...
+initial_cash: 300000.0
+buy_threshold: 0.02
+```
+
+然后运行：
 
 ```bash
 # 使用默认配置文件 (configs/backtest.yaml)
@@ -115,6 +197,11 @@ python run_backtest.py
 # 使用自定义配置文件
 python run_backtest.py --config configs/my_backtest.yaml
 ```
+
+**新特性 - 自动 Ticker 发现**：
+- 设置 `tickers: all` 会自动扫描 `data_dir/market/` 目录
+- 无需手动维护 ticker 列表
+- 适合处理大量 LOF 基金（如 400+ 个真实数据）
 
 #### 方式 2: 使用 Python 代码配置
 
@@ -312,6 +399,7 @@ print(df.attrs['redeem_fee_7d'])  # 0.015
 4. **数据清洗**：使用 `ffill()` 自动处理缺失值
 5. **费率缓存**：费率配置在首次加载后缓存，提高性能
 6. **费率附加**：费率配置自动附加到 DataFrame.attrs，可通过 `df.attrs['redeem_fee_7d']` 访问
+7. **自动 Ticker 发现**：`list_available_tickers()` 方法扫描数据目录，自动发现所有可用基金
 
 ## 配置文件管理
 
@@ -371,6 +459,24 @@ mock_config = MockConfig.from_yaml("configs/mock.yaml")
 backtest_config.to_yaml("configs/my_backtest.yaml")
 mock_config.to_yaml("configs/my_mock.yaml")
 ```
+
+### 数据源配置
+
+在 `backtest.yaml` 中指定数据源：
+
+```yaml
+# 使用真实数据
+data_dir: ./data/real_all_lof
+tickers: all  # 自动发现所有可用基金
+
+# 或使用 Mock 数据
+data_dir: ./data/mock
+tickers:
+  - "161005"
+  - "162411"
+```
+
+`run_backtest.py` 会自动根据 `data_dir` 创建对应的 `DataLoader` 实例，并处理 `tickers: all` 的情况。
 
 ### 多场景测试建议
 
@@ -515,6 +621,70 @@ stateDiagram-v2
 | end_date | DATE | 限购结束日期 |
 | max_amount | REAL | 限购期间最大申购金额 |
 | reason | TEXT | 限购原因 |
+
+## 真实数据下载器 (RealDataDownloader)
+
+### 功能特性
+
+`RealDataDownloader` 类提供了从 JoinQuant 下载真实 LOF 基金数据的能力：
+
+1. **自动发现所有 LOF 基金**：通过 JoinQuant API 查询所有上市 LOF 基金代码
+2. **批量下载**：智能分批处理，避免 API 超时和限流
+3. **完整数据下载**：
+   - 市场数据（OHLCV）：从 `get_price()` API 获取
+   - 净值数据（NAV）：从 `finance.run_query()` API 获取
+   - 限购事件：从基金公告中解析限购信息
+   - 费率配置：生成标准费率 CSV 文件
+4. **数据格式兼容**：输出格式与 `DataLoader` 完全兼容，可直接用于回测
+
+### 使用示例
+
+```python
+from src.data.downloader import RealDataDownloader
+import os
+
+# 方式 1: 从环境变量读取凭证
+downloader = RealDataDownloader(output_dir='./data/real_all_lof')
+downloader.authenticate_from_env()
+
+# 方式 2: 直接传入凭证
+downloader = RealDataDownloader()
+downloader.authenticate(username='your_username', password='your_password')
+
+# 下载所有 LOF 基金数据
+downloader.download_all(
+    start_date='2024-01-01',
+    end_date='2024-12-31'
+)
+
+# 或下载指定基金列表
+downloader.download_tickers(
+    tickers=['161005', '162411', '161725'],
+    start_date='2024-01-01',
+    end_date='2024-12-31'
+)
+```
+
+### 命令行使用
+
+```bash
+# 使用默认配置（从 .env 读取凭证）
+python scripts/download_lof.py
+
+# 自定义参数
+python scripts/download_lof.py \
+    --start 2024-01-01 \
+    --end 2024-12-31 \
+    --output ./data/custom \
+    --batch-size 30
+```
+
+### 注意事项
+
+- **API 配额**：JoinQuant 免费账户有每日查询次数限制，建议分批下载或使用付费账户
+- **数据完整性**：某些基金可能缺少历史数据，下载器会自动跳过并记录警告
+- **限购事件解析**：限购信息从基金公告中提取，可能不完整，建议手动验证重要基金
+- **网络稳定性**：大规模下载时建议在网络稳定的环境下运行，支持断点续传（跳过已存在的文件）
 
 ## 数据验证
 

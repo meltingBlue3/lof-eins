@@ -33,6 +33,17 @@ wheels/
 # Generated mock data (should be regenerated, not committed)
 data/mock/
 
+# Real data (downloaded from external sources)
+data/real_all_lof/
+
+# Environment files
+.env
+.env.local
+
+# Logs
+*.log
+backtest_execution.log
+
 # Cursor IDE (but keep plans directory)
 .cursor/*
 !.cursor/plans/
