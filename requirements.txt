@@ -1,6 +1,8 @@
 numpy==1.26.4
+pdfplumber>=0.10.0
 pyarrow>=14.0.0
 PyYAML>=6.0
 jqdatasdk==1.9.8
 python-dotenv>=1.0.0
 plotly>=5.0.0
+requests>=2.32.3
