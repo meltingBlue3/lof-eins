@@ -269,10 +269,19 @@ class RealDataDownloader:
             new_df.to_csv(csv_path, index=False)
 
     def _generate_limit_db(self) -> None:
-        """Create empty limit events database."""
+        """Create empty limit events database with enhanced schema.
+
+        Includes is_open_ended computed column, source_announcement_ids for audit trail,
+        and proper indexes for query performance.
+        """
         db_path = self.config_dir / "fund_status.db"
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
+
+        # Create limit_events table with enhanced schema
+        # - is_open_ended: computed column identifying open-ended limits (end_date IS NULL)
+        # - source_announcement_ids: JSON array of announcement IDs that contributed to this event
+        # - reason: human-readable context for why the limit exists
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS limit_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -280,9 +289,26 @@ class RealDataDownloader:
                 start_date DATE NOT NULL,
                 end_date DATE,
                 max_amount REAL NOT NULL,
-                reason TEXT
+                reason TEXT,
+                source_announcement_ids TEXT DEFAULT '[]',
+                is_open_ended INTEGER GENERATED ALWAYS AS (
+                    CASE WHEN end_date IS NULL THEN 1 ELSE 0 END
+                ) STORED
             )
         """)
+
+        # Create index on is_open_ended for efficient queries of open-ended limits
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_limit_events_is_open_ended
+            ON limit_events(is_open_ended)
+        """)
+
+        # Create index on ticker for efficient lookups
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_limit_events_ticker
+            ON limit_events(ticker)
+        """)
+
         conn.commit()
         conn.close()
 
