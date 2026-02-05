@@ -406,7 +406,16 @@ Return ONLY the JSON object, no additional explanation."""
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse LLM response as JSON: {e}")
                 logger.debug(f"Raw response: {llm_response_text}")
-                raise LLMError(f"Invalid JSON in LLM response: {e}")
+                return {
+                    "ticker": None,
+                    "limit_amount": None,
+                    "start_date": None,
+                    "end_date": None,
+                    "announcement_type": None,
+                    "is_purchase_limit_announcement": False,
+                    "confidence": 0.0,
+                    "error": f"Invalid JSON in LLM response: {e}",
+                }
 
             # Clean and validate the output
             cleaned = self._clean_output(parsed)

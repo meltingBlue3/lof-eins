@@ -79,7 +79,7 @@ Plans:
 **Plans:** 3 plans in 2 waves
 
 Plans:
-- [ ] 02-01-PLAN.md — PDF text extraction module (pdfplumber)
+- [x] 02-01-PLAN.md — PDF text extraction module (pdfplumber)
 - [ ] 02-02-PLAN.md — LLM client for parsing (Ollama API)
 - [ ] 02-03-PLAN.md — Orchestration and CLI tool
 
