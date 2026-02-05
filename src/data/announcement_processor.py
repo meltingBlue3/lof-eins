@@ -310,7 +310,9 @@ class AnnouncementProcessor:
             except (ValueError, TypeError):
                 confidence = None
 
-        with sqlite3.connect(self.db_path) as conn:
+        conn = None
+        try:
+            conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
             # Use INSERT OR REPLACE to handle re-processing
@@ -333,6 +335,9 @@ class AnnouncementProcessor:
 
             conn.commit()
             self.logger.debug(f"Stored parse result for {pdf_filename}")
+        finally:
+            if conn:
+                conn.close()
 
     def _parse_date_from_filename(self, filename: str) -> str:
         """
@@ -382,7 +387,9 @@ class AnnouncementProcessor:
         Returns:
             True if ticker has at least one parse result, False otherwise
         """
-        with sqlite3.connect(self.db_path) as conn:
+        conn = None
+        try:
+            conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT COUNT(*) FROM announcement_parses WHERE ticker = ?",
@@ -390,6 +397,9 @@ class AnnouncementProcessor:
             )
             count = cursor.fetchone()[0]
             return count > 0
+        finally:
+            if conn:
+                conn.close()
 
 
 def process_pdf(
