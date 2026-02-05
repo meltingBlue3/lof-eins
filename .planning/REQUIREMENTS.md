@@ -17,17 +17,17 @@
 
 ### PDF Processing
 
-- [ ] **PDF-01**: Extract text from downloaded PDF announcements
+- [x] **PDF-01**: Extract text from downloaded PDF announcements
   - Implement text extraction using pdfplumber or PyPDF2
   - Handle Chinese text encoding correctly
   - Clean and normalize extracted text
 
-- [ ] **PDF-02**: Parse limit information using local LLM
+- [x] **PDF-02**: Parse limit information using local LLM
   - Design extraction prompt for four announcement types
   - Call Ollama API with structured JSON output
   - Extract: has_limit_info, limit_type, start_date, end_date, max_amount, confidence
 
-- [ ] **PDF-03**: Store raw parse results in announcement_parses table
+- [x] **PDF-03**: Store raw parse results in announcement_parses table
   - Create table with: id, ticker, announcement_date, pdf_filename, parse_result (JSON), parse_type, confidence, processed flag
   - Save each PDF parse result immediately after extraction
 
@@ -138,9 +138,9 @@
 |-------------|-------|--------|
 | BUG-01 | Phase 1 | **Complete** |
 | BUG-02 | Phase 1 | **Complete** |
-| PDF-01 | Phase 2 | Pending |
-| PDF-02 | Phase 2 | Pending |
-| PDF-03 | Phase 2 | Pending |
+| PDF-01 | Phase 2 | **Complete** |
+| PDF-02 | Phase 2 | **Complete** |
+| PDF-03 | Phase 2 | **Complete** |
 | TIM-01 | Phase 3 | Pending |
 | TIM-02 | Phase 3 | Pending |
 | TIM-03 | Phase 3 | Pending |
@@ -159,4 +159,4 @@
 
 ---
 *Requirements defined: 2026-02-06*
-*Last updated: 2026-02-06 after initial definition*
+*Last updated: 2026-02-06 after Phase 2 completion*
