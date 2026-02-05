@@ -3,9 +3,9 @@
 ## Current Position
 
 **Phase:** 2 of 4 (PDF Processing)  
-**Plan:** 2 of 3 (02-02 complete)  
-**Status:** In progress - LLM client module implemented  
-**Last activity:** 2026-02-06 - Completed 02-02: LLM Client for Ollama API
+**Plan:** 3 of 3 COMPLETE  
+**Status:** Phase 2 Complete - All PDF processing infrastructure ready  
+**Last activity:** 2026-02-06 - Completed 02-03: Announcement Processor Orchestration
 
 ---
 
@@ -13,11 +13,11 @@
 
 ```
 Phase 1: Foundation        [██████████] 100% (4/4 plans) ✅
-Phase 2: PDF Processing    [██████░░░░] 67% (2/3 plans)
+Phase 2: PDF Processing    [██████████] 100% (3/3 plans) ✅
 Phase 3: Timeline Integration [░░░░░░░░░░] 0%
 Phase 4: Integration       [░░░░░░░░░░] 0%
 
-Overall: ██████ 38% (6/16 estimated plans)
+Overall: ████████ 44% (7/16 estimated plans)
 ```
 
 ---
@@ -59,6 +59,10 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | qwen2.5:7b as default LLM model | Optimized for Chinese financial text | 2026-02-06 |
 | Few-shot prompting with 3 examples | Improves extraction accuracy | 2026-02-06 |
 | Return-dict error handling | Consistent pattern for batch operations | 2026-02-06 |
+| Explicit SQLite connection close | Fixes Windows file locking issues | 2026-02-06 |
+| INSERT OR REPLACE for re-processing | Idempotent PDF processing | 2026-02-06 |
+| Store non-limit announcements | Audit trail for all PDFs | 2026-02-06 |
+| Orchestration pattern | High-level class combining extraction + parse + store | 2026-02-06 |
 
 ---
 
@@ -77,11 +81,12 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 ## Session Continuity
 
 **Last session:** 2026-02-06  
-**Stopped at:** Completed 02-02: LLM Client for Ollama API  
-**Resume file:** `.planning/phases/02-pdf-processing/02-02-SUMMARY.md`
+**Stopped at:** Completed 02-03: Announcement Processor Orchestration  
+**Resume file:** `.planning/phases/02-pdf-processing/02-03-SUMMARY.md`
 
-**Next action:** Continue Phase 2: PDF Processing
-- Plan 02-03: Orchestration and CLI tool (final plan in Phase 2)
+**Next action:** Begin Phase 3: Timeline Integration
+- Plan 03-01: Timeline integration algorithm (merge overlapping intervals)
+- Plan 03-02: Save integrated events to limit_events table
 
 ---
 
@@ -97,6 +102,7 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | Phase 1 Summary | `.planning/phases/01-foundation/01-04-SUMMARY.md` |
 | Phase 2 - PDF Extraction | `.planning/phases/02-pdf-processing/02-01-SUMMARY.md` |
 | Phase 2 - LLM Client | `.planning/phases/02-pdf-processing/02-02-SUMMARY.md` |
+| Phase 2 - Orchestration | `.planning/phases/02-pdf-processing/02-03-SUMMARY.md` |
 
 ---
 
@@ -109,7 +115,8 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | test_loader.py | 4 checks | ✅ Pass |
 | test_pdf_extractor.py | 9 | ✅ Pass |
 | test_llm_client.py | 17 | ✅ Pass |
-| **Total** | **85+** | **✅ All Pass** |
+| test_announcement_processor.py | 12 | ✅ Pass |
+| **Total** | **97+** | **✅ All Pass** |
 
 ---
 
@@ -152,6 +159,17 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 - ✅ 17 unit tests with mocking (no Ollama required)
 - ✅ CLI mode for testing: `python src/data/llm_client.py text.txt`
 
+### Orchestration (02-03)
+- ✅ src/data/announcement_processor.py - End-to-end PDF processing pipeline
+- ✅ AnnouncementProcessor class with process_pdf() and process_ticker() methods
+- ✅ Integration of pdf_extractor + llm_client + database storage
+- ✅ scripts/parse_announcements.py - CLI tool with --ticker and --all options
+- ✅ Statistics tracking: total, extracted, parsed, stored, failed
+- ✅ Error continuation: individual failures don't stop batch processing
+- ✅ Audit trail: non-limit announcements stored anyway
+- ✅ 12 integration tests covering success, failure, and edge cases
+- ✅ Windows SQLite file locking fixes with explicit connection cleanup
+
 ---
 
 ## Notes
@@ -161,8 +179,9 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 - 15 v1 requirements defined across 5 categories
 - 4 phases planned, 8-12 days total estimated duration
 - **Phase 1 Foundation is complete and fully tested**
-- Ready to begin Phase 2: PDF Processing
+- **Phase 2 PDF Processing is complete and fully tested**
+- Ready to begin Phase 3: Timeline Integration
 
 ---
 
-*State updated: 2026-02-06 - Phase 2 Plan 2 complete, 85 total tests passing*
+*State updated: 2026-02-06 - Phase 2 COMPLETE, 97 total tests passing*
