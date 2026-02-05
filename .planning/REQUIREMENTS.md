@@ -7,11 +7,11 @@
 
 ### Bug Fixes
 
-- [ ] **BUG-01**: DataLoader correctly handles NULL end_date for open-ended limits
+- [x] **BUG-01**: DataLoader correctly handles NULL end_date for open-ended limits
   - Fix `_resample_limits_to_daily()` to detect pd.isna(end) and apply mask accordingly
   - Test case: Event with end_date=NULL should apply to all dates >= start_date
 
-- [ ] **BUG-02**: Database schema allows NULL end_date consistently
+- [x] **BUG-02**: Database schema allows NULL end_date consistently
   - Update `downloader.py` CREATE TABLE to remove NOT NULL constraint on end_date
   - Ensure `generators.py` mock data respects nullable schema
 
@@ -53,17 +53,17 @@
 
 ### Database Schema
 
-- [ ] **DB-01**: Create announcement_parses table
+- [x] **DB-01**: Create announcement_parses table
   - Schema: id, ticker, announcement_date, pdf_filename, parse_result (JSON), parse_type, confidence, processed, created_at
   - Add indexes on ticker and processed fields
 
-- [ ] **DB-02**: Update limit_events schema
+- [x] **DB-02**: Update limit_events schema
   - Ensure end_date is nullable
   - Add is_open_ended generated column
   - Add source_announcement_ids text field (JSON)
   - Add reason field for audit trail
 
-- [ ] **DB-03**: Create limit_event_log table (optional but recommended)
+- [x] **DB-03**: Create limit_event_log table (optional but recommended)
   - Schema: id, ticker, operation, old_start, old_end, new_start, new_end, triggered_by, created_at
   - For debugging and auditing timeline changes
 
@@ -136,17 +136,17 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BUG-01 | Phase 1 | Pending |
-| BUG-02 | Phase 1 | Pending |
+| BUG-01 | Phase 1 | **Complete** |
+| BUG-02 | Phase 1 | **Complete** |
 | PDF-01 | Phase 2 | Pending |
 | PDF-02 | Phase 2 | Pending |
 | PDF-03 | Phase 2 | Pending |
 | TIM-01 | Phase 3 | Pending |
 | TIM-02 | Phase 3 | Pending |
 | TIM-03 | Phase 3 | Pending |
-| DB-01 | Phase 1 | Pending |
-| DB-02 | Phase 1 | Pending |
-| DB-03 | Phase 1 | Pending |
+| DB-01 | Phase 1 | **Complete** |
+| DB-02 | Phase 1 | **Complete** |
+| DB-03 | Phase 1 | **Complete** |
 | INT-01 | Phase 4 | Pending |
 | INT-02 | Phase 4 | Pending |
 | VAL-01 | Phase 4 | Pending |

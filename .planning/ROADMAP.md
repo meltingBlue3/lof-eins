@@ -43,10 +43,10 @@
 **Plans:** 4 plans in 3 waves
 
 Plans:
-- [ ] 01-01-PLAN.md — Fix critical bugs (BUG-01, BUG-02)
-- [ ] 01-02-PLAN.md — Create new tables (DB-01, DB-03)
-- [ ] 01-03-PLAN.md — Update limit_events schema (DB-02)
-- [ ] 01-04-PLAN.md — Add comprehensive unit tests
+- [x] 01-01-PLAN.md — Fix critical bugs (BUG-01, BUG-02)
+- [x] 01-02-PLAN.md — Create new tables (DB-01, DB-03)
+- [x] 01-03-PLAN.md — Update limit_events schema (DB-02)
+- [x] 01-04-PLAN.md — Add comprehensive unit tests
 
 **Wave Structure:**
 - Wave 1: 01-01, 01-02 (parallel - bug fixes and new tables)
@@ -216,10 +216,10 @@ Phase 4 (Integration & Validation)
 
 ## Success Metrics by Phase
 
-### Phase 1
-- [ ] All existing tests pass
-- [ ] New NULL handling tests pass
-- [ ] Database migrations run successfully
+### Phase 1 ✅ COMPLETE
+- [x] All existing tests pass
+- [x] New NULL handling tests pass
+- [x] Database migrations run successfully
 
 ### Phase 2
 - [ ] 95%+ PDF extraction success rate
