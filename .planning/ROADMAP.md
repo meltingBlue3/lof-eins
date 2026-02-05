@@ -76,13 +76,16 @@ Plans:
 - Handle LLM API errors gracefully
 - Cache extraction results to avoid re-processing
 
-**Tasks:**
-1. Implement `extract_pdf_text()` function
-2. Design and test extraction prompt
-3. Implement Ollama API client
-4. Create `announcement_parses` table operations
-5. Build CLI tool for testing extraction
-6. Validate extraction accuracy on sample PDFs
+**Plans:** 3 plans in 2 waves
+
+Plans:
+- [ ] 02-01-PLAN.md — PDF text extraction module (pdfplumber)
+- [ ] 02-02-PLAN.md — LLM client for parsing (Ollama API)
+- [ ] 02-03-PLAN.md — Orchestration and CLI tool
+
+**Wave Structure:**
+- Wave 1: 02-01, 02-02 (parallel - extraction and LLM client independent)
+- Wave 2: 02-03 (depends on both 02-01 and 02-02)
 
 **Key Files:**
 - `src/data/pdf_extractor.py` - Text extraction
