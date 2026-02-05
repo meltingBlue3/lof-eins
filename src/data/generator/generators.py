@@ -204,6 +204,7 @@ class FundStatusGenerator:
 
         # Create table if not exists
         # Note: end_date is nullable to support open-ended limits (limits without known end date)
+        # Includes is_open_ended computed column and source_announcement_ids for audit trail
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS limit_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -211,8 +212,18 @@ class FundStatusGenerator:
                 start_date DATE NOT NULL,
                 end_date DATE,  -- NULL indicates open-ended limit
                 max_amount REAL DEFAULT 100.0,
-                reason TEXT
+                reason TEXT,
+                source_announcement_ids TEXT DEFAULT '[]',
+                is_open_ended INTEGER GENERATED ALWAYS AS (
+                    CASE WHEN end_date IS NULL THEN 1 ELSE 0 END
+                ) STORED
             )
+        """)
+
+        # Create index on is_open_ended for efficient queries
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_limit_events_is_open_ended
+            ON limit_events(is_open_ended)
         """)
 
         # Create announcement_parses table for LLM extraction results
@@ -265,12 +276,12 @@ class FundStatusGenerator:
             ON limit_event_log(created_at)
         """)
 
-        # Insert limit events
+        # Insert limit events with source_announcement_ids (empty array for mock data)
         for event in limit_events:
             cursor.execute(
                 """
-                INSERT INTO limit_events (ticker, start_date, end_date, max_amount, reason)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO limit_events (ticker, start_date, end_date, max_amount, reason, source_announcement_ids)
+                VALUES (?, ?, ?, ?, ?, ?)
             """,
                 (
                     event["ticker"],
@@ -278,6 +289,7 @@ class FundStatusGenerator:
                     event["end_date"],
                     event["max_amount"],
                     event["reason"],
+                    "[]",  # Empty JSON array for mock data (no real announcements)
                 ),
             )
 
