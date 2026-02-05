@@ -40,12 +40,18 @@
 - Add comprehensive tests for the NULL end_date fix
 - Document schema changes in migration scripts
 
-**Tasks:**
-1. Fix `_resample_limits_to_daily()` in `loader.py`
-2. Update schema in `downloader.py` and `generators.py`
-3. Create migration scripts for new tables
-4. Write unit tests for NULL handling
-5. Verify existing tests still pass
+**Plans:** 4 plans in 3 waves
+
+Plans:
+- [ ] 01-01-PLAN.md — Fix critical bugs (BUG-01, BUG-02)
+- [ ] 01-02-PLAN.md — Create new tables (DB-01, DB-03)
+- [ ] 01-03-PLAN.md — Update limit_events schema (DB-02)
+- [ ] 01-04-PLAN.md — Add comprehensive unit tests
+
+**Wave Structure:**
+- Wave 1: 01-01, 01-02 (parallel - bug fixes and new tables)
+- Wave 2: 01-03 (depends on schema consistency from 01-01)
+- Wave 3: 01-04 (depends on all implementation)
 
 ---
 
