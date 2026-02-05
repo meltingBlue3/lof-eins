@@ -6,12 +6,12 @@ structured purchase limit information from fund announcement text.
 
 Setup:
     1. Install Ollama from https://ollama.com
-    2. Pull a suitable model: `ollama pull qwen2.5:7b` (recommended for Chinese)
+    2. Pull a suitable model: `ollama pull qwen3:8b` (recommended for Chinese)
     3. Ensure Ollama is running: `ollama serve` (or let it auto-start)
 
 Environment Variables:
-    OLLAMA_URL: Base URL for Ollama API (default: http://localhost:11434)
-    OLLAMA_MODEL: Model name to use (default: qwen2.5:7b)
+    OLLAMA_HOST: Base URL for Ollama API (default: http://localhost:11434)
+    OLLAMA_MODEL: Model name to use (default: qwen3:8b)
 
 Example Usage:
     >>> from src.data.llm_client import LLMClient, parse_announcement
@@ -43,63 +43,24 @@ import sys
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-import requests
+import ollama
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 # Configuration constants
-DEFAULT_OLLAMA_URL = "http://localhost:11434"
-DEFAULT_MODEL = "qwen2.5:7b"  # Good for Chinese text processing
+DEFAULT_MODEL = "qwen3:8b"  # Good for Chinese text processing
+MAX_TEXT_LENGTH = 8000  # Truncate input text to prevent context window overflow
 
+# System prompt: instructions, schema, and few-shot examples
+SYSTEM_PROMPT = """You are a financial document parser specializing in Chinese fund announcements.
 
-class LLMError(Exception):
-    """Raised when LLM API call fails or returns invalid response."""
-
-    pass
-
-
-class LLMClient:
-    """
-    Client for interacting with local Ollama LLM to parse fund announcements.
-
-    Attributes:
-        base_url: The base URL for the Ollama API
-        model: The model name to use for inference
-        session: A requests.Session for connection pooling
-    """
-
-    def __init__(self, base_url: Optional[str] = None, model: Optional[str] = None):
-        """
-        Initialize the LLM client.
-
-        Args:
-            base_url: Ollama API base URL. Defaults to OLLAMA_URL env var or localhost.
-            model: Model name to use. Defaults to OLLAMA_MODEL env var or qwen2.5:7b.
-        """
-        self.base_url = base_url or os.getenv("OLLAMA_URL", DEFAULT_OLLAMA_URL)
-        self.model = model or os.getenv("OLLAMA_MODEL", DEFAULT_MODEL)
-        self.session = requests.Session()
-        logger.info(f"Initialized LLMClient with model {self.model} at {self.base_url}")
-
-    def _build_prompt(self, text: str) -> str:
-        """
-        Build a structured prompt for the LLM to extract purchase limit information.
-
-        Args:
-            text: The extracted text from the PDF announcement
-
-        Returns:
-            A formatted prompt string with instructions and few-shot examples
-        """
-        prompt = f"""You are a financial document parser specializing in Chinese fund announcements.
-
-Your task is to extract purchase limit information from the following fund announcement text.
+Your task is to extract purchase limit information from the provided fund announcement text.
 Analyze the text carefully and return a JSON object with the extracted information.
 
 **Output Format (JSON):**
 ```json
-{{
+{
     "ticker": "string or null - Fund ticker code (e.g., '161005')",
     "limit_amount": "number or null - Maximum purchase amount in CNY (e.g., 100.0 for 100元)",
     "start_date": "YYYY-MM-DD or null - Limit start date",
@@ -107,7 +68,7 @@ Analyze the text carefully and return a JSON object with the extracted informati
     "announcement_type": "complete|open-start|end-only|modify|null",
     "is_purchase_limit_announcement": "boolean - true if this is a purchase limit announcement",
     "confidence": "number 0-1 - Confidence score for this extraction"
-}}
+}
 ```
 
 **Announcement Type Definitions:**
@@ -131,7 +92,7 @@ Example 1 (Complete announcement):
 Input: "富国天惠精选成长混合型证券投资基金(LOF)暂停大额申购、转换转入及定期定额投资业务的公告 为保护基金份额持有人的利益，本基金将于2024年1月15日起暂停大额申购，单日单账户累计申购金额不得超过100元，恢复时间另行通知。预计恢复时间为2024年3月1日。"
 Output:
 ```json
-{{
+{
     "ticker": "161005",
     "limit_amount": 100.0,
     "start_date": "2024-01-15",
@@ -139,14 +100,14 @@ Output:
     "announcement_type": "complete",
     "is_purchase_limit_announcement": true,
     "confidence": 0.95
-}}
+}
 ```
 
 Example 2 (Open-start announcement):
 Input: "关于限制旗下基金大额申购业务的公告 即日起，本基金单日单账户申购限额调整为1000元，上述限制将维持至2024年6月30日。"
 Output:
 ```json
-{{
+{
     "ticker": null,
     "limit_amount": 1000.0,
     "start_date": null,
@@ -154,14 +115,14 @@ Output:
     "announcement_type": "open-start",
     "is_purchase_limit_announcement": true,
     "confidence": 0.90
-}}
+}
 ```
 
 Example 3 (End-only announcement):
 Input: "关于恢复旗下基金大额申购业务的公告 本基金将于2024年2月1日起恢复大额申购业务，取消此前100元的单日申购限额。"
 Output:
 ```json
-{{
+{
     "ticker": null,
     "limit_amount": null,
     "start_date": null,
@@ -169,7 +130,7 @@ Output:
     "announcement_type": "end-only",
     "is_purchase_limit_announcement": true,
     "confidence": 0.92
-}}
+}
 ```
 
 **Important Notes:**
@@ -178,6 +139,65 @@ Output:
 - Chinese dates may be in various formats (e.g., "2024年1月15日", "2024-01-15"), normalize to YYYY-MM-DD
 - Amounts may be specified in different units (元, 万元), convert to numeric CNY
 
+Return ONLY the JSON object, no additional explanation."""
+
+
+class LLMError(Exception):
+    """Raised when LLM API call fails or returns invalid response."""
+
+    pass
+
+
+class LLMClient:
+    """
+    Client for interacting with local Ollama LLM to parse fund announcements.
+
+    Uses the ollama Python SDK with the Chat API for reliable instruction-following.
+
+    Attributes:
+        host: The base URL for the Ollama API
+        model: The model name to use for inference
+    """
+
+    def __init__(self, base_url: Optional[str] = None, model: Optional[str] = None):
+        """
+        Initialize the LLM client.
+
+        Args:
+            base_url: Ollama API base URL. If None, the ollama SDK uses its own
+                      default (reads OLLAMA_HOST env var, falls back to 127.0.0.1:11434).
+            model: Model name to use. Defaults to OLLAMA_MODEL env var or qwen3:8b.
+        """
+        self.host = base_url  # None lets ollama SDK pick its default
+        self.model = model or os.getenv("OLLAMA_MODEL", DEFAULT_MODEL)
+        # Only pass host when explicitly set; otherwise let the SDK resolve it
+        # (avoids localhost → IPv6 issues on Windows)
+        if self.host:
+            self._client = ollama.Client(host=self.host)
+        else:
+            self._client = ollama.Client()
+        logger.info(f"Initialized LLMClient with model {self.model}")
+
+    # Keep base_url as an alias for backward compatibility
+    @property
+    def base_url(self) -> Optional[str]:
+        return self.host
+
+    def _build_prompt(self, text: str) -> str:
+        """
+        Build the system prompt with instructions and few-shot examples.
+
+        This is kept for backward compatibility and testing. The actual prompt
+        sent to the model is split into system + user messages in parse_announcement().
+
+        Args:
+            text: The extracted text from the PDF announcement
+
+        Returns:
+            A formatted prompt string with instructions and few-shot examples
+        """
+        return f"""{SYSTEM_PROMPT}
+
 Now analyze the following announcement text:
 
 ---
@@ -185,7 +205,69 @@ Now analyze the following announcement text:
 ---
 
 Return ONLY the JSON object, no additional explanation."""
-        return prompt
+
+    @staticmethod
+    def _strip_thinking_tokens(text: str) -> str:
+        """
+        Strip qwen3 thinking tokens (<think>...</think>) from LLM response.
+
+        Args:
+            text: Raw LLM response text
+
+        Returns:
+            Text with thinking blocks removed
+        """
+        return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+    @staticmethod
+    def _extract_json_from_response(text: str) -> str:
+        """
+        Extract JSON object from free-form LLM response text.
+
+        Handles markdown code blocks, thinking tokens, and surrounding prose.
+
+        Args:
+            text: LLM response text potentially containing JSON
+
+        Returns:
+            Extracted JSON string
+
+        Raises:
+            ValueError: If no JSON object can be found
+        """
+        # Strip thinking tokens first
+        text = LLMClient._strip_thinking_tokens(text)
+
+        # Remove markdown code blocks
+        cleaned = re.sub(r"```json\s*", "", text)
+        cleaned = re.sub(r"```\s*", "", cleaned)
+        cleaned = cleaned.strip()
+
+        # Try parsing directly first
+        try:
+            json.loads(cleaned)
+            return cleaned
+        except json.JSONDecodeError:
+            pass
+
+        # Try to find a JSON object in the text using brace matching
+        brace_start = cleaned.find("{")
+        if brace_start != -1:
+            depth = 0
+            for i in range(brace_start, len(cleaned)):
+                if cleaned[i] == "{":
+                    depth += 1
+                elif cleaned[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = cleaned[brace_start : i + 1]
+                        try:
+                            json.loads(candidate)
+                            return candidate
+                        except json.JSONDecodeError:
+                            break
+
+        raise ValueError(f"No valid JSON object found in response")
 
     def _validate_date(self, date_str: Optional[str]) -> Optional[str]:
         """
@@ -216,7 +298,6 @@ Return ONLY the JSON object, no additional explanation."""
                 continue
 
         # Try to extract date using regex as fallback
-        # Match patterns like 2024-01-15, 2024/01/15, 2024年01月15日
         patterns = [
             r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})",
             r"(\d{4})年(\d{1,2})月(\d{1,2})日",
@@ -234,43 +315,6 @@ Return ONLY the JSON object, no additional explanation."""
 
         return None
 
-    def _extract_amount(self, text: str) -> Optional[float]:
-        """
-        Extract numeric amount from Chinese text.
-
-        Args:
-            text: Text containing amount information
-
-        Returns:
-            Extracted amount as float, or None if not found
-        """
-        if not text:
-            return None
-
-        # Match patterns like "100元", "100.5元", "100万元", "100万"
-        # Handle both Chinese and Arabic numerals
-        patterns = [
-            r"(\d+(?:\.\d+)?)\s*[万亿]元?",
-            r"(\d+(?:\.\d+)?)\s*元",
-            r"限额.*?([\d,]+(?:\.\d+)?)",
-            r"限制.*?([\d,]+(?:\.\d+)?)",
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, text)
-            if match:
-                amount_str = match.group(1).replace(",", "")
-                try:
-                    amount = float(amount_str)
-                    # Convert 万元 to yuan
-                    if "万" in text[match.start() : match.end() + 5]:
-                        amount *= 10000
-                    return amount
-                except ValueError:
-                    continue
-
-        return None
-
     def _clean_output(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         """
         Clean and validate the LLM output, ensuring all required fields exist.
@@ -281,7 +325,6 @@ Return ONLY the JSON object, no additional explanation."""
         Returns:
             Cleaned dictionary with all required fields
         """
-        # Define default values for all fields
         cleaned = {
             "ticker": None,
             "limit_amount": None,
@@ -292,7 +335,6 @@ Return ONLY the JSON object, no additional explanation."""
             "confidence": 0.0,
         }
 
-        # Update with actual values, validating as we go
         if isinstance(raw.get("ticker"), str):
             cleaned["ticker"] = raw["ticker"].strip() or None
 
@@ -330,13 +372,16 @@ Return ONLY the JSON object, no additional explanation."""
 
         return cleaned
 
-    def parse_announcement(self, text: str, timeout: int = 60) -> Dict[str, Any]:
+    def parse_announcement(self, text: str, timeout: int = 120) -> Dict[str, Any]:
         """
         Parse fund announcement text and extract structured limit information.
 
+        Uses the Ollama Chat API with system/user message separation for reliable
+        instruction-following. Input text is truncated to prevent context overflow.
+
         Args:
             text: The extracted text from the PDF announcement
-            timeout: Request timeout in seconds (default: 60)
+            timeout: Request timeout in seconds (default: 120)
 
         Returns:
             Dictionary containing extracted information with keys:
@@ -364,48 +409,38 @@ Return ONLY the JSON object, no additional explanation."""
                 "error": "Empty input text",
             }
 
-        # Build the prompt
-        prompt = self._build_prompt(text)
+        # Truncate long texts to prevent context window overflow
+        truncated_text = text[:MAX_TEXT_LENGTH]
+        if len(text) > MAX_TEXT_LENGTH:
+            logger.info(
+                f"Truncated input from {len(text)} to {MAX_TEXT_LENGTH} characters"
+            )
 
-        # Prepare the API request
-        api_url = f"{self.base_url}/api/generate"
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False,
-            "format": "json",
-        }
+        # Build messages for the Chat API (system + user separation)
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"文档内容如下：\n{truncated_text}"},
+        ]
 
         try:
-            logger.debug(f"Sending request to Ollama API: {api_url}")
-            response = self.session.post(api_url, json=payload, timeout=timeout)
-            response.raise_for_status()
+            logger.debug(f"Sending chat request to Ollama")
+            response = self._client.chat(
+                model=self.model,
+                messages=messages,
+                format="json",
+            )
 
-            # Parse the response
-            result = response.json()
+            # Extract the response content
+            llm_response_text = response["message"]["content"]
+            logger.debug(f"Raw LLM response length: {len(llm_response_text)} chars")
 
-            if "response" not in result:
-                logger.error(f"Unexpected API response format: {result}")
-                raise LLMError(f"Invalid API response: missing 'response' field")
-
-            # Extract and parse the JSON response from the LLM
-            llm_response_text = result["response"].strip()
-
-            # Handle code block formatting if present
-            if llm_response_text.startswith("```json"):
-                llm_response_text = llm_response_text[7:]
-            if llm_response_text.startswith("```"):
-                llm_response_text = llm_response_text[3:]
-            if llm_response_text.endswith("```"):
-                llm_response_text = llm_response_text[:-3]
-
-            llm_response_text = llm_response_text.strip()
-
+            # Extract JSON from the response (handles thinking tokens, code blocks)
             try:
-                parsed = json.loads(llm_response_text)
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse LLM response as JSON: {e}")
-                logger.debug(f"Raw response: {llm_response_text}")
+                json_str = self._extract_json_from_response(llm_response_text)
+                parsed = json.loads(json_str)
+            except (ValueError, json.JSONDecodeError) as e:
+                logger.error(f"Failed to extract JSON from LLM response: {e}")
+                logger.debug(f"Raw response: {llm_response_text[:500]}")
                 return {
                     "ticker": None,
                     "limit_amount": None,
@@ -428,8 +463,8 @@ Return ONLY the JSON object, no additional explanation."""
 
             return cleaned
 
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f"Failed to connect to Ollama API at {self.base_url}: {e}")
+        except ollama.ResponseError as e:
+            logger.error(f"Ollama API error: {e}")
             return {
                 "ticker": None,
                 "limit_amount": None,
@@ -438,11 +473,24 @@ Return ONLY the JSON object, no additional explanation."""
                 "announcement_type": None,
                 "is_purchase_limit_announcement": False,
                 "confidence": 0.0,
-                "error": f"Connection error: Cannot connect to Ollama at {self.base_url}. "
+                "error": f"Ollama API error: {str(e)}",
+            }
+        except ConnectionError as e:
+            host_display = self.host or "default (127.0.0.1:11434)"
+            logger.error(f"Failed to connect to Ollama at {host_display}: {e}")
+            return {
+                "ticker": None,
+                "limit_amount": None,
+                "start_date": None,
+                "end_date": None,
+                "announcement_type": None,
+                "is_purchase_limit_announcement": False,
+                "confidence": 0.0,
+                "error": f"Connection error: Cannot connect to Ollama at {host_display}. "
                 f"Ensure Ollama is installed and running. Visit https://ollama.com for setup instructions.",
             }
-        except requests.exceptions.Timeout as e:
-            logger.error(f"Request to Ollama API timed out after {timeout}s: {e}")
+        except TimeoutError as e:
+            logger.error(f"Request to Ollama timed out after {timeout}s: {e}")
             return {
                 "ticker": None,
                 "limit_amount": None,
@@ -452,18 +500,6 @@ Return ONLY the JSON object, no additional explanation."""
                 "is_purchase_limit_announcement": False,
                 "confidence": 0.0,
                 "error": f"Timeout error: Request took longer than {timeout} seconds",
-            }
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Request to Ollama API failed: {e}")
-            return {
-                "ticker": None,
-                "limit_amount": None,
-                "start_date": None,
-                "end_date": None,
-                "announcement_type": None,
-                "is_purchase_limit_announcement": False,
-                "confidence": 0.0,
-                "error": f"Request error: {str(e)}",
             }
         except LLMError:
             raise
@@ -519,8 +555,8 @@ if __name__ == "__main__":
         print("\nExample:")
         print("  python src/data/llm_client.py announcement_text.txt")
         print("\nEnvironment Variables:")
-        print("  OLLAMA_URL    - Ollama API URL (default: http://localhost:11434)")
-        print("  OLLAMA_MODEL  - Model name (default: qwen2.5:7b)")
+        print("  OLLAMA_HOST   - Ollama API URL (default: http://localhost:11434)")
+        print("  OLLAMA_MODEL  - Model name (default: qwen3:8b)")
         sys.exit(1)
 
     text_file = sys.argv[1]

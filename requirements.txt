@@ -6,3 +6,4 @@ jqdatasdk==1.9.8
 python-dotenv>=1.0.0
 plotly>=5.0.0
 requests>=2.32.3
+ollama>=0.4.0
