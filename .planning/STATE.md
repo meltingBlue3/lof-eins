@@ -3,21 +3,21 @@
 ## Current Position
 
 **Phase:** 1 of 4 (Foundation)  
-**Plan:** 1 of 4 (01-01 complete)  
-**Status:** In progress - Foundation bugs fixed  
-**Last activity:** 2026-02-06 - Completed 01-01: NULL end_date handling
+**Plan:** 2 of 4 (01-02 complete)  
+**Status:** In progress - Database schema for PDF processing complete  
+**Last activity:** 2026-02-06 - Completed 01-02: Database Schema for PDF Processing
 
 ---
 
 ## Progress
 
 ```
-Phase 1: Foundation        [██░░░░░░░░] 25% (1/4 plans)
+Phase 1: Foundation        [████░░░░░░] 50% (2/4 plans)
 Phase 2: PDF Processing    [░░░░░░░░░░] 0%
 Phase 3: Timeline Integration [░░░░░░░░░░] 0%
 Phase 4: Integration       [░░░░░░░░░░] 0%
 
-Overall: ○○○○ 6% (1/16 estimated plans)
+Overall: █░░░ 13% (2/16 estimated plans)
 ```
 
 ---
@@ -44,6 +44,9 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | YOLO mode with verification | Balance speed and quality | 2026-02-06 |
 | pd.isna() for NULL detection | Handles both NaT and None correctly | 2026-02-06 |
 | Consistent nullable schemas | All modules must support open-ended limits | 2026-02-06 |
+| IF NOT EXISTS for table creation | Idempotent operations, safe re-runs | 2026-02-06 |
+| JSON TEXT for parse_result | Flexible schema for varying LLM output formats | 2026-02-06 |
+| NULLable date fields in log | Supports operations without old/new values | 2026-02-06 |
 
 ---
 
@@ -61,10 +64,10 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 ## Session Continuity
 
 **Last session:** 2026-02-06  
-**Stopped at:** Completed 01-01: NULL end_date handling  
-**Resume file:** `.planning/phases/01-foundation/01-01-SUMMARY.md`
+**Stopped at:** Completed 01-02: Database Schema for PDF Processing  
+**Resume file:** `.planning/phases/01-foundation/01-02-SUMMARY.md`
 
-**Next action:** Execute 01-02 plan or continue with next Foundation task
+**Next action:** Continue with remaining Foundation tasks (01-03, 01-04) or proceed to Phase 2: PDF Processing
 
 ---
 
