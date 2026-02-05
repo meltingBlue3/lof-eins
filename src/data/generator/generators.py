@@ -215,6 +215,56 @@ class FundStatusGenerator:
             )
         """)
 
+        # Create announcement_parses table for LLM extraction results
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS announcement_parses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                announcement_date DATE NOT NULL,
+                pdf_filename TEXT NOT NULL,
+                parse_result TEXT,
+                parse_type TEXT,
+                confidence REAL,
+                processed INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Create indexes for announcement_parses
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_announcement_parses_ticker
+            ON announcement_parses(ticker)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_announcement_parses_processed
+            ON announcement_parses(processed)
+        """)
+
+        # Create limit_event_log table for audit trail of timeline changes
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS limit_event_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                old_start DATE,
+                old_end DATE,
+                new_start DATE,
+                new_end DATE,
+                triggered_by TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Create indexes for limit_event_log
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_limit_event_log_ticker
+            ON limit_event_log(ticker)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_limit_event_log_created_at
+            ON limit_event_log(created_at)
+        """)
+
         # Insert limit events
         for event in limit_events:
             cursor.execute(
