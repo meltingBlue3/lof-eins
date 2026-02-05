@@ -3,21 +3,21 @@
 ## Current Position
 
 **Phase:** 1 of 4 (Foundation)  
-**Plan:** — (Planning phase complete, ready for Phase 1)  
-**Status:** Project initialized ✓  
-**Last activity:** 2026-02-06 - Completed project initialization
+**Plan:** 1 of 4 (01-01 complete)  
+**Status:** In progress - Foundation bugs fixed  
+**Last activity:** 2026-02-06 - Completed 01-01: NULL end_date handling
 
 ---
 
 ## Progress
 
 ```
-Phase 1: Foundation        [░░░░░░░░░░] 0%
+Phase 1: Foundation        [██░░░░░░░░] 25% (1/4 plans)
 Phase 2: PDF Processing    [░░░░░░░░░░] 0%
 Phase 3: Timeline Integration [░░░░░░░░░░] 0%
 Phase 4: Integration       [░░░░░░░░░░] 0%
 
-Overall: ○○○○ 0% (0/4 phases)
+Overall: ○○○○ 6% (1/16 estimated plans)
 ```
 
 ---
@@ -42,6 +42,8 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | Three-table schema | Separation of concerns: raw/integrated/audit | 2026-02-06 |
 | O(n log n) merge algorithm | Optimal complexity, established pattern | 2026-02-06 |
 | YOLO mode with verification | Balance speed and quality | 2026-02-06 |
+| pd.isna() for NULL detection | Handles both NaT and None correctly | 2026-02-06 |
+| Consistent nullable schemas | All modules must support open-ended limits | 2026-02-06 |
 
 ---
 
@@ -59,10 +61,10 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 ## Session Continuity
 
 **Last session:** 2026-02-06  
-**Stopped at:** Project initialization complete  
-**Resume file:** `.planning/ROADMAP.md`
+**Stopped at:** Completed 01-01: NULL end_date handling  
+**Resume file:** `.planning/phases/01-foundation/01-01-SUMMARY.md`
 
-**Next action:** Run `/gsd:plan-phase 1` to begin Phase 1 planning
+**Next action:** Execute 01-02 plan or continue with next Foundation task
 
 ---
 
