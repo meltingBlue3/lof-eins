@@ -5,7 +5,7 @@
 **Phase:** 2 of 4 (PDF Processing)  
 **Plan:** 3 of 3 COMPLETE  
 **Status:** Phase 2 Complete - All PDF processing infrastructure ready  
-**Last activity:** 2026-02-07 - Completed quick-001: Unify DB Schema (end_date nullable)
+**Last activity:** 2026-02-07 - Completed quick-002: LLM Multi-Date Single-Ticker Parsing
 
 ---
 
@@ -46,6 +46,9 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | Consistent nullable schemas | All modules must support open-ended limits | 2026-02-06 |
 | IF NOT EXISTS for table creation | Idempotent operations, safe re-runs | 2026-02-06 |
 | JSON TEXT for parse_result | Flexible schema for varying LLM output formats | 2026-02-06 |
+| List[Dict] return type for parse_announcement | Supports multi-date announcements, one record per date | 2026-02-07 |
+| Minimum confidence across records for DB | Conservative quality signal for multi-record parses | 2026-02-07 |
+| Ticker-scoped LLM prompt template | Filters extraction to current ticker in multi-ticker PDFs | 2026-02-07 |
 | NULLable date fields in log | Supports operations without old/new values | 2026-02-06 |
 | GENERATED columns for computed values | Automatic open-ended limit detection | 2026-02-06 |
 | JSON TEXT for source_announcement_ids | Flexible array storage for audit trail | 2026-02-06 |
@@ -84,14 +87,15 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 001 | Unify DB schema: end_date nullable | 2026-02-07 | 59acb75 | [001-unify-db-schema-end-date-nullable](./quick/001-unify-db-schema-end-date-nullable/) |
+| 002 | LLM multi-date single-ticker parsing | 2026-02-07 | 24371f5 | [002-llm-multi-date-single-ticker-parsing](./quick/002-llm-multi-date-single-ticker-parsing/) |
 
 ---
 
 ## Session Continuity
 
 **Last session:** 2026-02-07  
-**Stopped at:** Completed quick-001: Unify DB Schema (end_date nullable)  
-**Resume file:** `.planning/quick/001-unify-db-schema-end-date-nullable/001-SUMMARY.md`
+**Stopped at:** Completed quick-002: LLM Multi-Date Single-Ticker Parsing  
+**Resume file:** `.planning/quick/002-llm-multi-date-single-ticker-parsing/002-SUMMARY.md`
 
 **Next action:** Begin Phase 3: Timeline Integration
 - Plan 03-01: Timeline integration algorithm (merge overlapping intervals)
@@ -113,6 +117,7 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | Phase 2 - LLM Client | `.planning/phases/02-pdf-processing/02-02-SUMMARY.md` |
 | Phase 2 - Orchestration | `.planning/phases/02-pdf-processing/02-03-SUMMARY.md` |
 | Quick 001 - Schema Unify | `.planning/quick/001-unify-db-schema-end-date-nullable/001-SUMMARY.md` |
+| Quick 002 - Multi-Date Parsing | `.planning/quick/002-llm-multi-date-single-ticker-parsing/002-SUMMARY.md` |
 
 ---
 
@@ -124,9 +129,9 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | test_database_schema.py | 47 | ✅ Pass |
 | test_loader.py | 4 checks | ✅ Pass |
 | test_pdf_extractor.py | 9 | ✅ Pass |
-| test_llm_client.py | 17 | ✅ Pass |
-| test_announcement_processor.py | 12 | ✅ Pass |
-| **Total** | **97+** | **✅ All Pass** |
+| test_llm_client.py | 22 | ✅ Pass |
+| test_announcement_processor.py | 13 | ✅ Pass |
+| **Total** | **103+** | **✅ All Pass** |
 
 ---
 
@@ -192,7 +197,8 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 - **Phase 2 PDF Processing is complete and fully tested**
 - Ready to begin Phase 3: Timeline Integration
 - **Quick-001:** Schema unified, migration scripts removed, generator fixed
+- **Quick-002:** LLM client returns List[Dict], supports multi-date/single-ticker parsing
 
 ---
 
-*State updated: 2026-02-07 - Quick-001 COMPLETE, 68 runnable tests passing (2 require ollama)*
+*State updated: 2026-02-07 - Quick-002 COMPLETE, 110 tests passing (2 require ollama)*
