@@ -79,6 +79,12 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 - Performance with large PDF batches
 - PDF text extraction quality (Phase 2 focus)
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 001 | Unify DB schema: end_date nullable | 2026-02-07 | 59acb75 | [001-unify-db-schema-end-date-nullable](./quick/001-unify-db-schema-end-date-nullable/) |
+
 ---
 
 ## Session Continuity
