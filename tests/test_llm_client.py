@@ -39,15 +39,17 @@ class TestLLMClient(unittest.TestCase):
         """Set up test fixtures."""
         self.client = LLMClient()
         self.mock_json = json.dumps(
-            {
-                "ticker": "161005",
-                "limit_amount": 100.0,
-                "start_date": "2024-01-01",
-                "end_date": "2024-03-01",
-                "announcement_type": "complete",
-                "is_purchase_limit_announcement": True,
-                "confidence": 0.95,
-            }
+            [
+                {
+                    "ticker": "161005",
+                    "limit_amount": 100.0,
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-03-01",
+                    "announcement_type": "complete",
+                    "is_purchase_limit_announcement": True,
+                    "confidence": 0.95,
+                }
+            ]
         )
 
     def test_parse_announcement_success(self):
@@ -60,36 +62,42 @@ class TestLLMClient(unittest.TestCase):
             # Verify API was called
             mock_chat.assert_called_once()
 
+            # Verify result is a list with one record
+            self.assertIsInstance(result, list)
+            self.assertEqual(len(result), 1)
+
             # Verify output structure
-            self.assertIn("ticker", result)
-            self.assertIn("limit_amount", result)
-            self.assertIn("start_date", result)
-            self.assertIn("end_date", result)
-            self.assertIn("announcement_type", result)
-            self.assertIn("is_purchase_limit_announcement", result)
-            self.assertIn("confidence", result)
+            self.assertIn("ticker", result[0])
+            self.assertIn("limit_amount", result[0])
+            self.assertIn("start_date", result[0])
+            self.assertIn("end_date", result[0])
+            self.assertIn("announcement_type", result[0])
+            self.assertIn("is_purchase_limit_announcement", result[0])
+            self.assertIn("confidence", result[0])
 
             # Verify values parsed correctly
-            self.assertEqual(result["ticker"], "161005")
-            self.assertEqual(result["limit_amount"], 100.0)
-            self.assertEqual(result["start_date"], "2024-01-01")
-            self.assertEqual(result["end_date"], "2024-03-01")
-            self.assertEqual(result["announcement_type"], "complete")
-            self.assertTrue(result["is_purchase_limit_announcement"])
-            self.assertEqual(result["confidence"], 0.95)
+            self.assertEqual(result[0]["ticker"], "161005")
+            self.assertEqual(result[0]["limit_amount"], 100.0)
+            self.assertEqual(result[0]["start_date"], "2024-01-01")
+            self.assertEqual(result[0]["end_date"], "2024-03-01")
+            self.assertEqual(result[0]["announcement_type"], "complete")
+            self.assertTrue(result[0]["is_purchase_limit_announcement"])
+            self.assertEqual(result[0]["confidence"], 0.95)
 
     def test_parse_announcement_not_limit(self):
         """Test handling of non-limit announcement."""
         not_limit_json = json.dumps(
-            {
-                "ticker": "161005",
-                "limit_amount": None,
-                "start_date": None,
-                "end_date": None,
-                "announcement_type": None,
-                "is_purchase_limit_announcement": False,
-                "confidence": 0.88,
-            }
+            [
+                {
+                    "ticker": "161005",
+                    "limit_amount": None,
+                    "start_date": None,
+                    "end_date": None,
+                    "announcement_type": None,
+                    "is_purchase_limit_announcement": False,
+                    "confidence": 0.88,
+                }
+            ]
         )
 
         with patch.object(self.client._client, "chat") as mock_chat:
@@ -97,9 +105,11 @@ class TestLLMClient(unittest.TestCase):
 
             result = self.client.parse_announcement("Quarterly report announcement")
 
-            self.assertFalse(result["is_purchase_limit_announcement"])
-            self.assertIsNone(result["limit_amount"])
-            self.assertIsNone(result["announcement_type"])
+            self.assertIsInstance(result, list)
+            self.assertEqual(len(result), 1)
+            self.assertFalse(result[0]["is_purchase_limit_announcement"])
+            self.assertIsNone(result[0]["limit_amount"])
+            self.assertIsNone(result[0]["announcement_type"])
 
     def test_parse_announcement_connection_error(self):
         """Test handling of connection failure."""
@@ -108,10 +118,12 @@ class TestLLMClient(unittest.TestCase):
 
             result = self.client.parse_announcement("Test text")
 
-            # Should return error dict, not raise
-            self.assertIn("error", result)
-            self.assertIn("Connection error", result["error"])
-            self.assertFalse(result["is_purchase_limit_announcement"])
+            # Should return list with error record, not raise
+            self.assertIsInstance(result, list)
+            self.assertEqual(len(result), 1)
+            self.assertIn("error", result[0])
+            self.assertIn("Connection error", result[0]["error"])
+            self.assertFalse(result[0]["is_purchase_limit_announcement"])
 
     def test_parse_announcement_timeout(self):
         """Test handling of request timeout."""
@@ -120,10 +132,12 @@ class TestLLMClient(unittest.TestCase):
 
             result = self.client.parse_announcement("Test text")
 
-            # Should return error dict, not raise
-            self.assertIn("error", result)
-            self.assertIn("Timeout error", result["error"])
-            self.assertFalse(result["is_purchase_limit_announcement"])
+            # Should return list with error record, not raise
+            self.assertIsInstance(result, list)
+            self.assertEqual(len(result), 1)
+            self.assertIn("error", result[0])
+            self.assertIn("Timeout error", result[0]["error"])
+            self.assertFalse(result[0]["is_purchase_limit_announcement"])
 
     def test_parse_announcement_invalid_json(self):
         """Test handling of malformed LLM response."""
@@ -134,22 +148,26 @@ class TestLLMClient(unittest.TestCase):
 
             result = self.client.parse_announcement("Test text")
 
-            # Should return error dict due to JSON parsing failure
-            self.assertIn("error", result)
-            self.assertIn("Invalid JSON", result["error"])
+            # Should return list with error record due to JSON parsing failure
+            self.assertIsInstance(result, list)
+            self.assertEqual(len(result), 1)
+            self.assertIn("error", result[0])
+            self.assertIn("Invalid JSON", result[0]["error"])
 
     def test_parse_announcement_open_start(self):
         """Test parsing of open-start announcement type."""
         open_start_json = json.dumps(
-            {
-                "ticker": "162411",
-                "limit_amount": 1000.0,
-                "start_date": None,
-                "end_date": "2024-06-30",
-                "announcement_type": "open-start",
-                "is_purchase_limit_announcement": True,
-                "confidence": 0.90,
-            }
+            [
+                {
+                    "ticker": "162411",
+                    "limit_amount": 1000.0,
+                    "start_date": None,
+                    "end_date": "2024-06-30",
+                    "announcement_type": "open-start",
+                    "is_purchase_limit_announcement": True,
+                    "confidence": 0.90,
+                }
+            ]
         )
 
         with patch.object(self.client._client, "chat") as mock_chat:
@@ -157,22 +175,26 @@ class TestLLMClient(unittest.TestCase):
 
             result = self.client.parse_announcement("Open start announcement")
 
-            self.assertEqual(result["announcement_type"], "open-start")
-            self.assertIsNone(result["start_date"])
-            self.assertEqual(result["end_date"], "2024-06-30")
+            self.assertIsInstance(result, list)
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["announcement_type"], "open-start")
+            self.assertIsNone(result[0]["start_date"])
+            self.assertEqual(result[0]["end_date"], "2024-06-30")
 
     def test_parse_announcement_end_only(self):
         """Test parsing of end-only announcement type."""
         end_only_json = json.dumps(
-            {
-                "ticker": "161725",
-                "limit_amount": None,
-                "start_date": None,
-                "end_date": "2024-02-01",
-                "announcement_type": "end-only",
-                "is_purchase_limit_announcement": True,
-                "confidence": 0.92,
-            }
+            [
+                {
+                    "ticker": "161725",
+                    "limit_amount": None,
+                    "start_date": None,
+                    "end_date": "2024-02-01",
+                    "announcement_type": "end-only",
+                    "is_purchase_limit_announcement": True,
+                    "confidence": 0.92,
+                }
+            ]
         )
 
         with patch.object(self.client._client, "chat") as mock_chat:
@@ -180,23 +202,27 @@ class TestLLMClient(unittest.TestCase):
 
             result = self.client.parse_announcement("End only announcement")
 
-            self.assertEqual(result["announcement_type"], "end-only")
-            self.assertIsNone(result["start_date"])
-            self.assertEqual(result["end_date"], "2024-02-01")
-            self.assertIsNone(result["limit_amount"])
+            self.assertIsInstance(result, list)
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["announcement_type"], "end-only")
+            self.assertIsNone(result[0]["start_date"])
+            self.assertEqual(result[0]["end_date"], "2024-02-01")
+            self.assertIsNone(result[0]["limit_amount"])
 
     def test_parse_announcement_modify(self):
         """Test parsing of modify announcement type."""
         modify_json = json.dumps(
-            {
-                "ticker": "501018",
-                "limit_amount": 500.0,
-                "start_date": "2024-03-01",
-                "end_date": "2024-12-31",
-                "announcement_type": "modify",
-                "is_purchase_limit_announcement": True,
-                "confidence": 0.87,
-            }
+            [
+                {
+                    "ticker": "501018",
+                    "limit_amount": 500.0,
+                    "start_date": "2024-03-01",
+                    "end_date": "2024-12-31",
+                    "announcement_type": "modify",
+                    "is_purchase_limit_announcement": True,
+                    "confidence": 0.87,
+                }
+            ]
         )
 
         with patch.object(self.client._client, "chat") as mock_chat:
@@ -204,8 +230,10 @@ class TestLLMClient(unittest.TestCase):
 
             result = self.client.parse_announcement("Modify announcement")
 
-            self.assertEqual(result["announcement_type"], "modify")
-            self.assertEqual(result["limit_amount"], 500.0)
+            self.assertIsInstance(result, list)
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["announcement_type"], "modify")
+            self.assertEqual(result[0]["limit_amount"], 500.0)
 
     def test_prompt_building(self):
         """Test that prompt is built correctly with examples."""
@@ -221,13 +249,22 @@ class TestLLMClient(unittest.TestCase):
         self.assertIn("modify", prompt)
         self.assertIn("Test announcement", prompt)
 
-        # Check for example announcements
+        # Check for example announcements (including new multi-date/multi-ticker)
         self.assertIn("Example 1", prompt)
         self.assertIn("Example 2", prompt)
         self.assertIn("Example 3", prompt)
+        self.assertIn("Example 4", prompt)
+        self.assertIn("Example 5", prompt)
 
         # Check for Chinese context
         self.assertIn("Chinese", prompt)
+
+        # Check for array output instruction
+        self.assertIn("JSON array", prompt)
+
+        # Test with ticker parameter
+        prompt_with_ticker = self.client._build_prompt(text, ticker="161005")
+        self.assertIn("161005", prompt_with_ticker)
 
     def test_date_validation(self):
         """Test date validation helper."""
@@ -249,7 +286,7 @@ class TestLLMClient(unittest.TestCase):
 
     def test_clean_output(self):
         """Test output cleaning and validation."""
-        # Test with valid data
+        # Test with valid data (dict input -> list output)
         raw = {
             "ticker": "161005",
             "limit_amount": 100.0,
@@ -260,40 +297,59 @@ class TestLLMClient(unittest.TestCase):
             "confidence": 0.95,
         }
         cleaned = self.client._clean_output(raw)
-        self.assertEqual(cleaned["ticker"], "161005")
-        self.assertEqual(cleaned["confidence"], 0.95)
+        self.assertIsInstance(cleaned, list)
+        self.assertEqual(len(cleaned), 1)
+        self.assertEqual(cleaned[0]["ticker"], "161005")
+        self.assertEqual(cleaned[0]["confidence"], 0.95)
 
         # Test with missing fields
         raw_partial = {"ticker": "161005"}
         cleaned = self.client._clean_output(raw_partial)
-        self.assertEqual(cleaned["ticker"], "161005")
-        self.assertIsNone(cleaned["limit_amount"])
-        self.assertFalse(cleaned["is_purchase_limit_announcement"])
-        self.assertEqual(cleaned["confidence"], 0.0)
+        self.assertIsInstance(cleaned, list)
+        self.assertEqual(len(cleaned), 1)
+        self.assertEqual(cleaned[0]["ticker"], "161005")
+        self.assertIsNone(cleaned[0]["limit_amount"])
+        self.assertFalse(cleaned[0]["is_purchase_limit_announcement"])
+        self.assertEqual(cleaned[0]["confidence"], 0.0)
 
         # Test confidence clamping
         raw_high_conf = {"confidence": 1.5}
         cleaned = self.client._clean_output(raw_high_conf)
-        self.assertEqual(cleaned["confidence"], 1.0)
+        self.assertEqual(cleaned[0]["confidence"], 1.0)
 
         raw_low_conf = {"confidence": -0.5}
         cleaned = self.client._clean_output(raw_low_conf)
-        self.assertEqual(cleaned["confidence"], 0.0)
+        self.assertEqual(cleaned[0]["confidence"], 0.0)
+
+        # Test with list input
+        raw_list = [
+            {"ticker": "A", "confidence": 0.9},
+            {"ticker": "B", "confidence": 0.8},
+        ]
+        cleaned = self.client._clean_output(raw_list)
+        self.assertIsInstance(cleaned, list)
+        self.assertEqual(len(cleaned), 2)
+        self.assertEqual(cleaned[0]["ticker"], "A")
+        self.assertEqual(cleaned[1]["ticker"], "B")
 
     def test_empty_text(self):
         """Test handling of empty text input."""
         result = self.client.parse_announcement("")
 
-        self.assertIn("error", result)
-        self.assertIn("Empty input text", result["error"])
-        self.assertFalse(result["is_purchase_limit_announcement"])
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
+        self.assertIn("error", result[0])
+        self.assertIn("Empty input text", result[0]["error"])
+        self.assertFalse(result[0]["is_purchase_limit_announcement"])
 
     def test_whitespace_text(self):
         """Test handling of whitespace-only text."""
         result = self.client.parse_announcement("   \n\t  ")
 
-        self.assertIn("error", result)
-        self.assertIn("Empty input text", result["error"])
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
+        self.assertIn("error", result[0])
+        self.assertIn("Empty input text", result[0]["error"])
 
     def test_convenience_function(self):
         """Test the module-level parse_announcement convenience function."""
@@ -304,8 +360,10 @@ class TestLLMClient(unittest.TestCase):
 
             result = parse_announcement("Test text")
 
-            self.assertEqual(result["ticker"], "161005")
-            self.assertTrue(result["is_purchase_limit_announcement"])
+            self.assertIsInstance(result, list)
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["ticker"], "161005")
+            self.assertTrue(result[0]["is_purchase_limit_announcement"])
 
     def test_json_with_code_blocks(self):
         """Test parsing JSON wrapped in markdown code blocks."""
@@ -316,8 +374,10 @@ class TestLLMClient(unittest.TestCase):
 
             result = self.client.parse_announcement("Test text")
 
-            self.assertEqual(result["ticker"], "161005")
-            self.assertEqual(result["confidence"], 0.95)
+            self.assertIsInstance(result, list)
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["ticker"], "161005")
+            self.assertEqual(result[0]["confidence"], 0.95)
 
     def test_thinking_tokens_stripped(self):
         """Test that qwen3 thinking tokens are stripped before JSON extraction."""
@@ -332,9 +392,11 @@ class TestLLMClient(unittest.TestCase):
 
             result = self.client.parse_announcement("Test text")
 
-            self.assertEqual(result["ticker"], "161005")
-            self.assertEqual(result["limit_amount"], 100.0)
-            self.assertTrue(result["is_purchase_limit_announcement"])
+            self.assertIsInstance(result, list)
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["ticker"], "161005")
+            self.assertEqual(result[0]["limit_amount"], 100.0)
+            self.assertTrue(result[0]["is_purchase_limit_announcement"])
 
     def test_thinking_tokens_with_code_blocks(self):
         """Test thinking tokens combined with markdown code blocks."""
@@ -348,14 +410,15 @@ class TestLLMClient(unittest.TestCase):
 
             result = self.client.parse_announcement("Test text")
 
-            self.assertEqual(result["ticker"], "161005")
-            self.assertTrue(result["is_purchase_limit_announcement"])
+            self.assertIsInstance(result, list)
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["ticker"], "161005")
+            self.assertTrue(result[0]["is_purchase_limit_announcement"])
 
     def test_strip_thinking_tokens_static(self):
         """Test the static _strip_thinking_tokens method directly."""
         text_with_thinking = (
-            "<think>Some internal reasoning here</think>\n"
-            '{"result": "value"}'
+            '<think>Some internal reasoning here</think>\n{"result": "value"}'
         )
         stripped = LLMClient._strip_thinking_tokens(text_with_thinking)
         self.assertNotIn("<think>", stripped)
@@ -367,13 +430,11 @@ class TestLLMClient(unittest.TestCase):
 
     def test_extract_json_from_response_static(self):
         """Test the static _extract_json_from_response method directly."""
-        # Plain JSON
+        # Plain JSON object
         plain_json = '{"key": "value"}'
-        self.assertEqual(
-            LLMClient._extract_json_from_response(plain_json), plain_json
-        )
+        self.assertEqual(LLMClient._extract_json_from_response(plain_json), plain_json)
 
-        # JSON in code block
+        # JSON object in code block
         code_block = '```json\n{"key": "value"}\n```'
         result = LLMClient._extract_json_from_response(code_block)
         parsed = json.loads(result)
@@ -389,6 +450,20 @@ class TestLLMClient(unittest.TestCase):
         with self.assertRaises(ValueError):
             LLMClient._extract_json_from_response("No JSON here at all")
 
+        # Plain JSON array
+        plain_array = '[{"key": "value"}]'
+        result = LLMClient._extract_json_from_response(plain_array)
+        parsed = json.loads(result)
+        self.assertIsInstance(parsed, list)
+        self.assertEqual(parsed[0]["key"], "value")
+
+        # JSON array in code block
+        array_code_block = '```json\n[{"key": "value"}, {"key": "value2"}]\n```'
+        result = LLMClient._extract_json_from_response(array_code_block)
+        parsed = json.loads(result)
+        self.assertIsInstance(parsed, list)
+        self.assertEqual(len(parsed), 2)
+
     def test_ollama_response_error(self):
         """Test handling of ollama.ResponseError."""
         import ollama as ollama_module
@@ -398,9 +473,110 @@ class TestLLMClient(unittest.TestCase):
 
             result = self.client.parse_announcement("Test text")
 
-            self.assertIn("error", result)
-            self.assertIn("Ollama API error", result["error"])
-            self.assertFalse(result["is_purchase_limit_announcement"])
+            self.assertIsInstance(result, list)
+            self.assertEqual(len(result), 1)
+            self.assertIn("error", result[0])
+            self.assertIn("Ollama API error", result[0]["error"])
+            self.assertFalse(result[0]["is_purchase_limit_announcement"])
+
+    def test_parse_announcement_multi_date(self):
+        """Test parsing announcement with multiple non-consecutive dates."""
+        multi_date_json = json.dumps(
+            [
+                {
+                    "ticker": "160119",
+                    "limit_amount": 100.0,
+                    "start_date": "2024-04-18",
+                    "end_date": "2024-04-18",
+                    "announcement_type": "complete",
+                    "is_purchase_limit_announcement": True,
+                    "confidence": 0.90,
+                },
+                {
+                    "ticker": "160119",
+                    "limit_amount": 100.0,
+                    "start_date": "2024-04-21",
+                    "end_date": "2024-04-21",
+                    "announcement_type": "complete",
+                    "is_purchase_limit_announcement": True,
+                    "confidence": 0.90,
+                },
+                {
+                    "ticker": "160119",
+                    "limit_amount": 100.0,
+                    "start_date": "2024-07-01",
+                    "end_date": "2024-07-01",
+                    "announcement_type": "complete",
+                    "is_purchase_limit_announcement": True,
+                    "confidence": 0.90,
+                },
+            ]
+        )
+        with patch.object(self.client._client, "chat") as mock_chat:
+            mock_chat.return_value = _make_chat_response(multi_date_json)
+            result = self.client.parse_announcement("Multi date text", ticker="160119")
+            self.assertIsInstance(result, list)
+            self.assertEqual(len(result), 3)
+            self.assertEqual(result[0]["start_date"], "2024-04-18")
+            self.assertEqual(result[1]["start_date"], "2024-04-21")
+            self.assertEqual(result[2]["start_date"], "2024-07-01")
+
+    def test_parse_announcement_single_ticker_filter(self):
+        """Test that ticker parameter is passed to prompt."""
+        with patch.object(self.client._client, "chat") as mock_chat:
+            mock_chat.return_value = _make_chat_response(
+                json.dumps(
+                    [
+                        {
+                            "ticker": "160127",
+                            "limit_amount": 1000.0,
+                            "start_date": "2024-03-01",
+                            "end_date": None,
+                            "announcement_type": "complete",
+                            "is_purchase_limit_announcement": True,
+                            "confidence": 0.92,
+                        }
+                    ]
+                )
+            )
+            result = self.client.parse_announcement(
+                "Multi ticker text", ticker="160127"
+            )
+            # Verify ticker was included in the system message
+            call_args = mock_chat.call_args
+            messages = call_args[1].get("messages") or call_args[0][0]
+            system_msg = messages[0]["content"]
+            self.assertIn("160127", system_msg)
+            # Verify result only contains our ticker
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["ticker"], "160127")
+
+    def test_clean_output_wraps_single_dict(self):
+        """Test that _clean_output wraps a single dict in a list."""
+        raw = {
+            "ticker": "161005",
+            "confidence": 0.9,
+            "is_purchase_limit_announcement": True,
+        }
+        cleaned = self.client._clean_output(raw)
+        self.assertIsInstance(cleaned, list)
+        self.assertEqual(len(cleaned), 1)
+        self.assertEqual(cleaned[0]["ticker"], "161005")
+
+    def test_build_system_prompt_with_ticker(self):
+        """Test that _build_system_prompt includes ticker when provided."""
+        prompt = self.client._build_system_prompt("161005")
+        self.assertIn("161005", prompt)
+        self.assertIn("Only extract purchase limit information for THIS ticker", prompt)
+
+    def test_build_system_prompt_without_ticker(self):
+        """Test that _build_system_prompt works without ticker."""
+        prompt = self.client._build_system_prompt()
+        self.assertNotIn(
+            "Only extract purchase limit information for THIS ticker", prompt
+        )
+        # Should still have the array output format
+        self.assertIn("JSON array", prompt)
 
 
 class TestLLMClientEnvironment(unittest.TestCase):
@@ -460,11 +636,15 @@ class TestLLMClientIntegration(unittest.TestCase):
         单日单账户累计申购金额不得超过100元，恢复时间另行通知。
         """
 
-        result = self.client.parse_announcement(sample_text)
+        result = self.client.parse_announcement(sample_text, ticker="161005")
 
-        # Basic structure check
-        self.assertIn("ticker", result)
-        self.assertIn("is_purchase_limit_announcement", result)
+        # Result is now a list
+        self.assertIsInstance(result, list)
+        self.assertGreater(len(result), 0)
+
+        # Basic structure check on first record
+        self.assertIn("ticker", result[0])
+        self.assertIn("is_purchase_limit_announcement", result[0])
 
         # Should detect this is a limit announcement
         print(f"Real LLM response: {json.dumps(result, ensure_ascii=False, indent=2)}")
@@ -479,6 +659,9 @@ class TestLLMClientIntegration(unittest.TestCase):
         """
 
         result = self.client.parse_announcement(non_limit_text)
+
+        self.assertIsInstance(result, list)
+        self.assertGreater(len(result), 0)
 
         print(
             f"Non-limit announcement response: {json.dumps(result, ensure_ascii=False, indent=2)}"

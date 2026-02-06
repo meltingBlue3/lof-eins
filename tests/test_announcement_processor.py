@@ -151,15 +151,17 @@ class TestAnnouncementProcessor(unittest.TestCase):
             "error": None,
         }
 
-        self.mock_llm_client.parse_announcement.return_value = {
-            "ticker": "161005",
-            "limit_amount": 100.0,
-            "start_date": "2024-01-15",
-            "end_date": "2024-03-01",
-            "announcement_type": "complete",
-            "is_purchase_limit_announcement": True,
-            "confidence": 0.95,
-        }
+        self.mock_llm_client.parse_announcement.return_value = [
+            {
+                "ticker": "161005",
+                "limit_amount": 100.0,
+                "start_date": "2024-01-15",
+                "end_date": "2024-03-01",
+                "announcement_type": "complete",
+                "is_purchase_limit_announcement": True,
+                "confidence": 0.95,
+            }
+        ]
 
         # Execute
         pdf_path = self.ticker_dir / "2024-01-15_限购公告.pdf"
@@ -173,6 +175,11 @@ class TestAnnouncementProcessor(unittest.TestCase):
         self.assertTrue(result["is_limit_announcement"])
         self.assertIsNone(result["error"])
 
+        # Verify parse_announcement was called with ticker kwarg
+        self.mock_llm_client.parse_announcement.assert_called_once_with(
+            "测试公告内容：限购金额100元，从2024-01-15开始", ticker="161005"
+        )
+
         # Verify database entry
         entries = self._get_db_entries("161005")
         self.assertEqual(len(entries), 1)
@@ -182,10 +189,12 @@ class TestAnnouncementProcessor(unittest.TestCase):
         self.assertEqual(entry[2], "2024-01-15")  # announcement_date
         self.assertEqual(entry[3], "2024-01-15_限购公告.pdf")  # pdf_filename
 
-        # Verify parse_result JSON
+        # Verify parse_result JSON (now stored as array)
         parse_result = json.loads(entry[4])
-        self.assertEqual(parse_result["limit_amount"], 100.0)
-        self.assertEqual(parse_result["announcement_type"], "complete")
+        self.assertIsInstance(parse_result, list)
+        self.assertEqual(len(parse_result), 1)
+        self.assertEqual(parse_result[0]["limit_amount"], 100.0)
+        self.assertEqual(parse_result[0]["announcement_type"], "complete")
 
         # Verify parse_type and confidence
         self.assertEqual(entry[5], "complete")  # parse_type
@@ -245,15 +254,17 @@ class TestAnnouncementProcessor(unittest.TestCase):
             "error": None,
         }
 
-        self.mock_llm_client.parse_announcement.return_value = {
-            "ticker": None,
-            "limit_amount": None,
-            "start_date": None,
-            "end_date": None,
-            "announcement_type": None,
-            "is_purchase_limit_announcement": False,
-            "confidence": 0.85,
-        }
+        self.mock_llm_client.parse_announcement.return_value = [
+            {
+                "ticker": None,
+                "limit_amount": None,
+                "start_date": None,
+                "end_date": None,
+                "announcement_type": None,
+                "is_purchase_limit_announcement": False,
+                "confidence": 0.85,
+            }
+        ]
 
         # Execute
         pdf_path = self.ticker_dir / "2024-01-15_季度报告.pdf"
@@ -269,7 +280,8 @@ class TestAnnouncementProcessor(unittest.TestCase):
         self.assertEqual(len(entries), 1)
 
         parse_result = json.loads(entries[0][4])
-        self.assertFalse(parse_result["is_purchase_limit_announcement"])
+        self.assertIsInstance(parse_result, list)
+        self.assertFalse(parse_result[0]["is_purchase_limit_announcement"])
 
     @patch("src.data.announcement_processor.extract_pdf_text")
     def test_process_ticker_batch(self, mock_extract):
@@ -309,15 +321,17 @@ class TestAnnouncementProcessor(unittest.TestCase):
         mock_extract.side_effect = side_effect
 
         # Setup LLM mock
-        self.mock_llm_client.parse_announcement.return_value = {
-            "ticker": "161005",
-            "limit_amount": 100.0,
-            "start_date": "2024-01-01",
-            "end_date": "2024-12-31",
-            "announcement_type": "complete",
-            "is_purchase_limit_announcement": True,
-            "confidence": 0.90,
-        }
+        self.mock_llm_client.parse_announcement.return_value = [
+            {
+                "ticker": "161005",
+                "limit_amount": 100.0,
+                "start_date": "2024-01-01",
+                "end_date": "2024-12-31",
+                "announcement_type": "complete",
+                "is_purchase_limit_announcement": True,
+                "confidence": 0.90,
+            }
+        ]
 
         # Execute
         result = self.processor.process_ticker("161005")
@@ -332,6 +346,48 @@ class TestAnnouncementProcessor(unittest.TestCase):
         # Verify database has 2 entries
         entries = self._get_db_entries("161005")
         self.assertEqual(len(entries), 2)
+
+    @patch("src.data.announcement_processor.extract_pdf_text")
+    def test_process_pdf_multi_record(self, mock_extract):
+        """Test processing PDF that yields multiple records."""
+        mock_extract.return_value = {
+            "success": True,
+            "text": "multi date text",
+            "pages": 1,
+            "error": None,
+        }
+        self.mock_llm_client.parse_announcement.return_value = [
+            {
+                "ticker": "161005",
+                "limit_amount": 100.0,
+                "start_date": "2024-04-18",
+                "end_date": "2024-04-18",
+                "announcement_type": "complete",
+                "is_purchase_limit_announcement": True,
+                "confidence": 0.90,
+            },
+            {
+                "ticker": "161005",
+                "limit_amount": 100.0,
+                "start_date": "2024-07-01",
+                "end_date": "2024-07-01",
+                "announcement_type": "complete",
+                "is_purchase_limit_announcement": True,
+                "confidence": 0.85,
+            },
+        ]
+        pdf_path = self.ticker_dir / "2024-01-15_限购公告.pdf"
+        result = self.processor.process_pdf("161005", pdf_path)
+        self.assertTrue(result["success"])
+        self.assertTrue(result["is_limit_announcement"])
+        # Verify DB stores the array
+        entries = self._get_db_entries("161005")
+        self.assertEqual(len(entries), 1)  # Still one row per PDF
+        parse_result = json.loads(entries[0][4])
+        self.assertIsInstance(parse_result, list)
+        self.assertEqual(len(parse_result), 2)
+        # Confidence should be minimum
+        self.assertEqual(entries[0][6], 0.85)
 
     def test_date_extraction_from_filename(self):
         """
@@ -376,15 +432,17 @@ class TestAnnouncementProcessor(unittest.TestCase):
             "error": None,
         }
 
-        parse_result = {
-            "ticker": "161005",
-            "limit_amount": 500.0,
-            "start_date": "2024-01-01",
-            "end_date": "2024-06-30",
-            "announcement_type": "complete",
-            "is_purchase_limit_announcement": True,
-            "confidence": 0.92,
-        }
+        parse_result = [
+            {
+                "ticker": "161005",
+                "limit_amount": 500.0,
+                "start_date": "2024-01-01",
+                "end_date": "2024-06-30",
+                "announcement_type": "complete",
+                "is_purchase_limit_announcement": True,
+                "confidence": 0.92,
+            }
+        ]
 
         self.mock_llm_client.parse_announcement.return_value = parse_result
 
@@ -398,15 +456,17 @@ class TestAnnouncementProcessor(unittest.TestCase):
 
         entry = entries[0]
 
-        # Verify JSON is valid and contains all fields
+        # Verify JSON is valid and contains array of records
         stored_result = json.loads(entry[4])
-        self.assertEqual(stored_result["ticker"], "161005")
-        self.assertEqual(stored_result["limit_amount"], 500.0)
-        self.assertEqual(stored_result["start_date"], "2024-01-01")
-        self.assertEqual(stored_result["end_date"], "2024-06-30")
-        self.assertEqual(stored_result["announcement_type"], "complete")
-        self.assertTrue(stored_result["is_purchase_limit_announcement"])
-        self.assertEqual(stored_result["confidence"], 0.92)
+        self.assertIsInstance(stored_result, list)
+        self.assertEqual(len(stored_result), 1)
+        self.assertEqual(stored_result[0]["ticker"], "161005")
+        self.assertEqual(stored_result[0]["limit_amount"], 500.0)
+        self.assertEqual(stored_result[0]["start_date"], "2024-01-01")
+        self.assertEqual(stored_result[0]["end_date"], "2024-06-30")
+        self.assertEqual(stored_result[0]["announcement_type"], "complete")
+        self.assertTrue(stored_result[0]["is_purchase_limit_announcement"])
+        self.assertEqual(stored_result[0]["confidence"], 0.92)
 
         # Verify parse_type and confidence columns
         self.assertEqual(entry[5], "complete")  # parse_type
@@ -439,10 +499,12 @@ class TestAnnouncementProcessor(unittest.TestCase):
         # Create additional PDF that will fail
         (self.ticker_dir / "2024-04-01_失败公告.pdf").touch()
 
-        self.mock_llm_client.parse_announcement.return_value = {
-            "is_purchase_limit_announcement": True,
-            "confidence": 0.90,
-        }
+        self.mock_llm_client.parse_announcement.return_value = [
+            {
+                "is_purchase_limit_announcement": True,
+                "confidence": 0.90,
+            }
+        ]
 
         # Execute
         result = self.processor.process_ticker("161005")
@@ -513,17 +575,19 @@ class TestAnnouncementProcessor(unittest.TestCase):
             "error": None,
         }
 
-        # LLM returns result with error
-        self.mock_llm_client.parse_announcement.return_value = {
-            "ticker": None,
-            "limit_amount": None,
-            "start_date": None,
-            "end_date": None,
-            "announcement_type": None,
-            "is_purchase_limit_announcement": False,
-            "confidence": 0.0,
-            "error": "Connection error: Cannot connect to Ollama",
-        }
+        # LLM returns result with error (now as list)
+        self.mock_llm_client.parse_announcement.return_value = [
+            {
+                "ticker": None,
+                "limit_amount": None,
+                "start_date": None,
+                "end_date": None,
+                "announcement_type": None,
+                "is_purchase_limit_announcement": False,
+                "confidence": 0.0,
+                "error": "Connection error: Cannot connect to Ollama",
+            }
+        ]
 
         # Execute
         pdf_path = self.ticker_dir / "2024-01-15_限购公告.pdf"
@@ -533,13 +597,14 @@ class TestAnnouncementProcessor(unittest.TestCase):
         self.assertTrue(result["stored"])
         self.assertIn("LLM parsing failed", result["error"])
 
-        # Verify database entry contains error
+        # Verify database entry contains error (stored as JSON array)
         entries = self._get_db_entries("161005")
         self.assertEqual(len(entries), 1)
 
         parse_result = json.loads(entries[0][4])
-        self.assertIn("error", parse_result)
-        self.assertIn("Cannot connect to Ollama", parse_result["error"])
+        self.assertIsInstance(parse_result, list)
+        self.assertIn("error", parse_result[0])
+        self.assertIn("Cannot connect to Ollama", parse_result[0]["error"])
 
 
 class TestConvenienceFunctions(unittest.TestCase):
