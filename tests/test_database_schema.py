@@ -212,19 +212,20 @@ class TestDatabaseSchema(unittest.TestCase):
         self.assertEqual(end_col[2], "DATE", "end_date should be DATE")
         self.assertEqual(end_col[3], 0, "end_date should be nullable")
 
-    def test_limit_events_max_amount_default(self):
-        """Test max_amount column: REAL with DEFAULT 100.0."""
+    def test_limit_events_max_amount_not_null(self):
+        """Test max_amount column: REAL NOT NULL."""
         info = self._get_table_info("limit_events")
         max_col = [row for row in info if row[1] == "max_amount"][0]
 
         self.assertEqual(max_col[2], "REAL", "max_amount should be REAL")
-        # Check default value in CREATE TABLE statement
+        self.assertEqual(max_col[3], 1, "max_amount should be NOT NULL")
+        # Check NOT NULL in CREATE TABLE statement
         self.cursor.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='limit_events'"
         )
         create_sql = self.cursor.fetchone()[0]
         self.assertIn(
-            "DEFAULT 100.0", create_sql, "max_amount should have DEFAULT 100.0"
+            "max_amount REAL NOT NULL", create_sql, "max_amount should be REAL NOT NULL"
         )
 
     def test_limit_events_reason_nullable(self):
