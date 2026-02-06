@@ -5,7 +5,7 @@
 **Phase:** 2 of 4 (PDF Processing)  
 **Plan:** 3 of 3 COMPLETE  
 **Status:** Phase 2 Complete - All PDF processing infrastructure ready  
-**Last activity:** 2026-02-06 - Completed 02-03: Announcement Processor Orchestration
+**Last activity:** 2026-02-07 - Completed quick-001: Unify DB Schema (end_date nullable)
 
 ---
 
@@ -63,6 +63,9 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | INSERT OR REPLACE for re-processing | Idempotent PDF processing | 2026-02-06 |
 | Store non-limit announcements | Audit trail for all PDFs | 2026-02-06 |
 | Orchestration pattern | High-level class combining extraction + parse + store | 2026-02-06 |
+| max_amount REAL NOT NULL (not DEFAULT) | Every insert provides explicit value, DEFAULT was misleading | 2026-02-07 |
+| None for open-ended limit end_date | Represents genuinely open-ended limit, not last-date hack | 2026-02-07 |
+| Remove migration scripts (no real data) | Fresh table creation is the only path, no data to migrate | 2026-02-07 |
 
 ---
 
@@ -80,9 +83,9 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 
 ## Session Continuity
 
-**Last session:** 2026-02-06  
-**Stopped at:** Completed 02-03: Announcement Processor Orchestration  
-**Resume file:** `.planning/phases/02-pdf-processing/02-03-SUMMARY.md`
+**Last session:** 2026-02-07  
+**Stopped at:** Completed quick-001: Unify DB Schema (end_date nullable)  
+**Resume file:** `.planning/quick/001-unify-db-schema-end-date-nullable/001-SUMMARY.md`
 
 **Next action:** Begin Phase 3: Timeline Integration
 - Plan 03-01: Timeline integration algorithm (merge overlapping intervals)
@@ -103,6 +106,7 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | Phase 2 - PDF Extraction | `.planning/phases/02-pdf-processing/02-01-SUMMARY.md` |
 | Phase 2 - LLM Client | `.planning/phases/02-pdf-processing/02-02-SUMMARY.md` |
 | Phase 2 - Orchestration | `.planning/phases/02-pdf-processing/02-03-SUMMARY.md` |
+| Quick 001 - Schema Unify | `.planning/quick/001-unify-db-schema-end-date-nullable/001-SUMMARY.md` |
 
 ---
 
@@ -134,7 +138,7 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 ### Schema Updates (01-03)
 - ✅ is_open_ended generated column (CASE WHEN end_date IS NULL THEN 1 ELSE 0 END)
 - ✅ source_announcement_ids JSON column for audit trail
-- ✅ Migration script 002_update_limit_events.py
+- ~~Migration script 002_update_limit_events.py~~ (removed in quick-001)
 
 ### Unit Tests (01-04)
 - ✅ test_open_ended_limits.py (770 lines, 12 tests)
@@ -181,7 +185,8 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 - **Phase 1 Foundation is complete and fully tested**
 - **Phase 2 PDF Processing is complete and fully tested**
 - Ready to begin Phase 3: Timeline Integration
+- **Quick-001:** Schema unified, migration scripts removed, generator fixed
 
 ---
 
-*State updated: 2026-02-06 - Phase 2 COMPLETE, 97 total tests passing*
+*State updated: 2026-02-07 - Quick-001 COMPLETE, 68 runnable tests passing (2 require ollama)*
