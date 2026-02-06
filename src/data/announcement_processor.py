@@ -26,7 +26,7 @@ import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 from .llm_client import LLMClient
 from .pdf_extractor import extract_pdf_text
@@ -130,11 +130,18 @@ class AnnouncementProcessor:
             f"Extracted {len(extracted_text)} characters from {pdf_path.name}"
         )
 
-        # Step 2: Parse with LLM
-        parse_result = self.llm_client.parse_announcement(extracted_text)
+        # Step 2: Parse with LLM (returns List[Dict])
+        parse_result = self.llm_client.parse_announcement(extracted_text, ticker=ticker)
 
-        if parse_result.get("error"):
-            error_msg = f"LLM parsing failed: {parse_result['error']}"
+        # Check for errors: if any record has an 'error' key, treat as error
+        first_error = None
+        for record in parse_result:
+            if record.get("error"):
+                first_error = record["error"]
+                break
+
+        if first_error:
+            error_msg = f"LLM parsing failed: {first_error}"
             self.logger.warning(f"{error_msg} - File: {pdf_path}")
             result["error"] = error_msg
             # Still store the error result for audit trail
@@ -142,11 +149,13 @@ class AnnouncementProcessor:
         else:
             result["parsed"] = True
             result["parse_result"] = parse_result
-            result["is_limit_announcement"] = parse_result.get(
-                "is_purchase_limit_announcement", False
+            # is_limit_announcement: True if ANY record has is_purchase_limit_announcement
+            result["is_limit_announcement"] = any(
+                r.get("is_purchase_limit_announcement", False) for r in parse_result
             )
             self.logger.info(
-                f"Parsed announcement: type={parse_result.get('announcement_type')}, "
+                f"Parsed {len(parse_result)} record(s) from announcement: "
+                f"type={parse_result[0].get('announcement_type')}, "
                 f"is_limit={result['is_limit_announcement']}"
             )
 
@@ -282,33 +291,51 @@ class AnnouncementProcessor:
         ticker: str,
         announcement_date: str,
         pdf_filename: str,
-        parse_result: dict,
+        parse_result: List[Dict] | Dict | None,
     ) -> None:
         """
         Save parse result to the announcement_parses table.
+
+        Stores the full list of records as a JSON array in the parse_result column.
+        One DB row per PDF — the JSON blob is now an array of records.
 
         Args:
             ticker: Fund ticker code
             announcement_date: Date string in YYYY-MM-DD format
             pdf_filename: Name of the PDF file
-            parse_result: Dictionary with parsed information from LLM
+            parse_result: List of dicts (or single dict for backward compat)
+                          with parsed information from LLM
 
         Raises:
             sqlite3.Error: If database operation fails
         """
-        # Convert parse_result dict to JSON string
-        parse_result_json = json.dumps(parse_result, ensure_ascii=False)
+        # Normalize to list for consistent storage
+        if isinstance(parse_result, dict):
+            records = [parse_result]
+        elif isinstance(parse_result, list):
+            records = parse_result
+        else:
+            records = []
 
-        # Extract fields from parse_result
-        parse_type = parse_result.get("announcement_type") if parse_result else None
-        confidence = parse_result.get("confidence") if parse_result else None
+        # Convert to JSON string (always an array)
+        parse_result_json = json.dumps(records, ensure_ascii=False)
 
-        # Ensure confidence is a valid float
-        if confidence is not None:
-            try:
-                confidence = float(confidence)
-            except (ValueError, TypeError):
-                confidence = None
+        # Extract parse_type: use first non-null announcement_type
+        parse_type = None
+        for record in records:
+            if record.get("announcement_type"):
+                parse_type = record["announcement_type"]
+                break
+
+        # Extract confidence: use minimum confidence (conservative)
+        confidences = []
+        for record in records:
+            if record.get("confidence") is not None:
+                try:
+                    confidences.append(float(record["confidence"]))
+                except (ValueError, TypeError):
+                    pass
+        confidence = min(confidences) if confidences else None
 
         conn = None
         try:
@@ -334,7 +361,7 @@ class AnnouncementProcessor:
             )
 
             conn.commit()
-            self.logger.debug(f"Stored parse result for {pdf_filename}")
+            self.logger.debug(f"Stored {len(records)} record(s) for {pdf_filename}")
         finally:
             if conn:
                 conn.close()
