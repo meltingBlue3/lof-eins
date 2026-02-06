@@ -21,18 +21,20 @@ Example Usage:
     >>> result = client.parse_announcement(extracted_text)
     >>>
     >>> # Using the convenience function
-    >>> result = parse_announcement(extracted_text)
+    >>> result = parse_announcement(extracted_text, ticker="161005")
     >>>
     >>> print(result)
-    {
-        "ticker": "161005",
-        "limit_amount": 100.0,
-        "start_date": "2024-01-01",
-        "end_date": "2024-03-01",
-        "announcement_type": "complete",
-        "is_purchase_limit_announcement": True,
-        "confidence": 0.95
-    }
+    [
+        {
+            "ticker": "161005",
+            "limit_amount": 100.0,
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-01",
+            "announcement_type": "complete",
+            "is_purchase_limit_announcement": True,
+            "confidence": 0.95
+        }
+    ]
 """
 
 import json
@@ -41,7 +43,7 @@ import os
 import re
 import sys
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import ollama
 
@@ -52,24 +54,30 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL = "qwen3:8b"  # Good for Chinese text processing
 MAX_TEXT_LENGTH = 8000  # Truncate input text to prevent context window overflow
 
-# System prompt: instructions, schema, and few-shot examples
-SYSTEM_PROMPT = """You are a financial document parser specializing in Chinese fund announcements.
+# System prompt template: instructions, schema, and few-shot examples
+# Contains {ticker_instruction} placeholder filled by _build_system_prompt()
+SYSTEM_PROMPT_TEMPLATE = """You are a financial document parser specializing in Chinese fund announcements.
 
 Your task is to extract purchase limit information from the provided fund announcement text.
-Analyze the text carefully and return a JSON object with the extracted information.
+Analyze the text carefully and return a JSON **array** of records with the extracted information.
+{ticker_instruction}
 
-**Output Format (JSON):**
+**Output Format (JSON array):**
 ```json
-{
-    "ticker": "string or null - Fund ticker code (e.g., '161005')",
-    "limit_amount": "number or null - Maximum purchase amount in CNY (e.g., 100.0 for 100元)",
-    "start_date": "YYYY-MM-DD or null - Limit start date",
-    "end_date": "YYYY-MM-DD or null - Limit end date",
-    "announcement_type": "complete|open-start|end-only|modify|null",
-    "is_purchase_limit_announcement": "boolean - true if this is a purchase limit announcement",
-    "confidence": "number 0-1 - Confidence score for this extraction"
-}
+[
+    {{
+        "ticker": "string or null - Fund ticker code (e.g., '161005')",
+        "limit_amount": "number or null - Maximum purchase amount in CNY (e.g., 100.0 for 100元)",
+        "start_date": "YYYY-MM-DD or null - Limit start date",
+        "end_date": "YYYY-MM-DD or null - Limit end date",
+        "announcement_type": "complete|open-start|end-only|modify|null",
+        "is_purchase_limit_announcement": "boolean - true if this is a purchase limit announcement",
+        "confidence": "number 0-1 - Confidence score for this extraction"
+    }}
+]
 ```
+
+**Multi-date handling:** If the announcement specifies multiple non-consecutive dates (e.g., "4月18日、4月21日、7月1日"), create a SEPARATE record for each date or consecutive date range. Consecutive dates (e.g., "12月25日、26日") should be merged into one record with start_date and end_date.
 
 **Announcement Type Definitions:**
 1. **complete**: Has both start_date and end_date (完整公告 - 限购开始和结束日期都明确)
@@ -91,47 +99,39 @@ Analyze the text carefully and return a JSON object with the extracted informati
 Example 1 (Complete announcement):
 Input: "富国天惠精选成长混合型证券投资基金(LOF)暂停大额申购、转换转入及定期定额投资业务的公告 为保护基金份额持有人的利益，本基金将于2024年1月15日起暂停大额申购，单日单账户累计申购金额不得超过100元，恢复时间另行通知。预计恢复时间为2024年3月1日。"
 Output:
-```json
-{
-    "ticker": "161005",
-    "limit_amount": 100.0,
-    "start_date": "2024-01-15",
-    "end_date": "2024-03-01",
-    "announcement_type": "complete",
-    "is_purchase_limit_announcement": true,
-    "confidence": 0.95
-}
-```
+[
+    {{"ticker": "161005", "limit_amount": 100.0, "start_date": "2024-01-15", "end_date": "2024-03-01", "announcement_type": "complete", "is_purchase_limit_announcement": true, "confidence": 0.95}}
+]
 
 Example 2 (Open-start announcement):
 Input: "关于限制旗下基金大额申购业务的公告 即日起，本基金单日单账户申购限额调整为1000元，上述限制将维持至2024年6月30日。"
 Output:
-```json
-{
-    "ticker": null,
-    "limit_amount": 1000.0,
-    "start_date": null,
-    "end_date": "2024-06-30",
-    "announcement_type": "open-start",
-    "is_purchase_limit_announcement": true,
-    "confidence": 0.90
-}
-```
+[
+    {{"ticker": null, "limit_amount": 1000.0, "start_date": null, "end_date": "2024-06-30", "announcement_type": "open-start", "is_purchase_limit_announcement": true, "confidence": 0.90}}
+]
 
 Example 3 (End-only announcement):
 Input: "关于恢复旗下基金大额申购业务的公告 本基金将于2024年2月1日起恢复大额申购业务，取消此前100元的单日申购限额。"
 Output:
-```json
-{
-    "ticker": null,
-    "limit_amount": null,
-    "start_date": null,
-    "end_date": "2024-02-01",
-    "announcement_type": "end-only",
-    "is_purchase_limit_announcement": true,
-    "confidence": 0.92
-}
-```
+[
+    {{"ticker": null, "limit_amount": null, "start_date": null, "end_date": "2024-02-01", "announcement_type": "end-only", "is_purchase_limit_announcement": true, "confidence": 0.92}}
+]
+
+Example 4 (Multiple non-consecutive dates):
+Input: "南方中证500ETF联接基金(LOF)(160119)自2024年4月18日、4月21日、7月1日起暂停大额申购，单日限额100元。"
+Output:
+[
+    {{"ticker": "160119", "limit_amount": 100.0, "start_date": "2024-04-18", "end_date": "2024-04-18", "announcement_type": "complete", "is_purchase_limit_announcement": true, "confidence": 0.90}},
+    {{"ticker": "160119", "limit_amount": 100.0, "start_date": "2024-04-21", "end_date": "2024-04-21", "announcement_type": "complete", "is_purchase_limit_announcement": true, "confidence": 0.90}},
+    {{"ticker": "160119", "limit_amount": 100.0, "start_date": "2024-07-01", "end_date": "2024-07-01", "announcement_type": "complete", "is_purchase_limit_announcement": true, "confidence": 0.90}}
+]
+
+Example 5 (Multi-ticker — extract only the specified ticker):
+Input (ticker=160127): "南方消费活力灵活配置混合型证券投资基金(160127)及南方中证互联网指数分级证券投资基金(160142)暂停大额申购，限额1000元，自2024年3月1日起。"
+Output:
+[
+    {{"ticker": "160127", "limit_amount": 1000.0, "start_date": "2024-03-01", "end_date": null, "announcement_type": "complete", "is_purchase_limit_announcement": true, "confidence": 0.92}}
+]
 
 **Important Notes:**
 - If the text is NOT a purchase limit announcement (e.g., quarterly report, dividend announcement, manager change), set `is_purchase_limit_announcement: false`
@@ -139,7 +139,7 @@ Output:
 - Chinese dates may be in various formats (e.g., "2024年1月15日", "2024-01-15"), normalize to YYYY-MM-DD
 - Amounts may be specified in different units (元, 万元), convert to numeric CNY
 
-Return ONLY the JSON object, no additional explanation."""
+Return ONLY the JSON array, no additional explanation."""
 
 
 class LLMError(Exception):
@@ -183,20 +183,43 @@ class LLMClient:
     def base_url(self) -> Optional[str]:
         return self.host
 
-    def _build_prompt(self, text: str) -> str:
+    def _build_system_prompt(self, ticker: Optional[str] = None) -> str:
         """
-        Build the system prompt with instructions and few-shot examples.
+        Build the system prompt with ticker-specific filtering instruction.
+
+        Args:
+            ticker: Fund ticker code. If provided, adds instruction to only extract
+                    information for this ticker.
+
+        Returns:
+            Formatted system prompt string
+        """
+        if ticker:
+            ticker_instruction = (
+                f"You are parsing an announcement that belongs to ticker `{ticker}`. "
+                "Only extract purchase limit information for THIS ticker. "
+                "If the announcement mentions other tickers, ignore them completely."
+            )
+        else:
+            ticker_instruction = ""
+        return SYSTEM_PROMPT_TEMPLATE.format(ticker_instruction=ticker_instruction)
+
+    def _build_prompt(self, text: str, ticker: Optional[str] = None) -> str:
+        """
+        Build the full prompt with instructions and few-shot examples.
 
         This is kept for backward compatibility and testing. The actual prompt
         sent to the model is split into system + user messages in parse_announcement().
 
         Args:
             text: The extracted text from the PDF announcement
+            ticker: Optional fund ticker code for filtering
 
         Returns:
             A formatted prompt string with instructions and few-shot examples
         """
-        return f"""{SYSTEM_PROMPT}
+        system_prompt = self._build_system_prompt(ticker)
+        return f"""{system_prompt}
 
 Now analyze the following announcement text:
 
@@ -204,7 +227,7 @@ Now analyze the following announcement text:
 {text}
 ---
 
-Return ONLY the JSON object, no additional explanation."""
+Return ONLY the JSON array, no additional explanation."""
 
     @staticmethod
     def _strip_thinking_tokens(text: str) -> str:
@@ -222,18 +245,19 @@ Return ONLY the JSON object, no additional explanation."""
     @staticmethod
     def _extract_json_from_response(text: str) -> str:
         """
-        Extract JSON object from free-form LLM response text.
+        Extract JSON array or object from free-form LLM response text.
 
         Handles markdown code blocks, thinking tokens, and surrounding prose.
+        Supports both JSON arrays and single JSON objects.
 
         Args:
             text: LLM response text potentially containing JSON
 
         Returns:
-            Extracted JSON string
+            Extracted JSON string (may be array or object)
 
         Raises:
-            ValueError: If no JSON object can be found
+            ValueError: If no valid JSON can be found
         """
         # Strip thinking tokens first
         text = LLMClient._strip_thinking_tokens(text)
@@ -249,6 +273,23 @@ Return ONLY the JSON object, no additional explanation."""
             return cleaned
         except json.JSONDecodeError:
             pass
+
+        # Try to find a JSON array in the text using bracket matching
+        bracket_start = cleaned.find("[")
+        if bracket_start != -1:
+            depth = 0
+            for i in range(bracket_start, len(cleaned)):
+                if cleaned[i] == "[":
+                    depth += 1
+                elif cleaned[i] == "]":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = cleaned[bracket_start : i + 1]
+                        try:
+                            json.loads(candidate)
+                            return candidate
+                        except json.JSONDecodeError:
+                            break
 
         # Try to find a JSON object in the text using brace matching
         brace_start = cleaned.find("{")
@@ -267,7 +308,7 @@ Return ONLY the JSON object, no additional explanation."""
                         except json.JSONDecodeError:
                             break
 
-        raise ValueError(f"No valid JSON object found in response")
+        raise ValueError(f"No valid JSON found in response")
 
     def _validate_date(self, date_str: Optional[str]) -> Optional[str]:
         """
@@ -315,9 +356,9 @@ Return ONLY the JSON object, no additional explanation."""
 
         return None
 
-    def _clean_output(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+    def _clean_single_record(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Clean and validate the LLM output, ensuring all required fields exist.
+        Clean and validate a single LLM output record, ensuring all required fields exist.
 
         Args:
             raw: Raw dictionary from LLM response
@@ -372,7 +413,40 @@ Return ONLY the JSON object, no additional explanation."""
 
         return cleaned
 
-    def parse_announcement(self, text: str, timeout: int = 120) -> Dict[str, Any]:
+    def _clean_output(self, raw: Any) -> List[Dict[str, Any]]:
+        """
+        Clean and validate LLM output, handling both single dicts and lists.
+
+        Always returns a List[Dict] for consistent downstream handling.
+
+        Args:
+            raw: Raw output from LLM — may be a dict, list of dicts, or other
+
+        Returns:
+            List of cleaned dictionaries with all required fields
+        """
+        if isinstance(raw, list):
+            return [self._clean_single_record(item) for item in raw]
+        elif isinstance(raw, dict):
+            return [self._clean_single_record(raw)]
+        else:
+            # Unexpected type — return a single error record
+            return [
+                {
+                    "ticker": None,
+                    "limit_amount": None,
+                    "start_date": None,
+                    "end_date": None,
+                    "announcement_type": None,
+                    "is_purchase_limit_announcement": False,
+                    "confidence": 0.0,
+                    "error": f"Unexpected LLM output type: {type(raw).__name__}",
+                }
+            ]
+
+    def parse_announcement(
+        self, text: str, ticker: Optional[str] = None, timeout: int = 120
+    ) -> List[Dict[str, Any]]:
         """
         Parse fund announcement text and extract structured limit information.
 
@@ -381,10 +455,12 @@ Return ONLY the JSON object, no additional explanation."""
 
         Args:
             text: The extracted text from the PDF announcement
+            ticker: Optional fund ticker code. If provided, the LLM is instructed
+                    to only extract information for this ticker.
             timeout: Request timeout in seconds (default: 120)
 
         Returns:
-            Dictionary containing extracted information with keys:
+            List of dictionaries, each containing extracted information with keys:
             - ticker: Fund ticker code or null
             - limit_amount: Maximum purchase amount or null
             - start_date: Limit start date (YYYY-MM-DD) or null
@@ -398,16 +474,18 @@ Return ONLY the JSON object, no additional explanation."""
         """
         if not text or not text.strip():
             logger.warning("Empty text provided to parse_announcement")
-            return {
-                "ticker": None,
-                "limit_amount": None,
-                "start_date": None,
-                "end_date": None,
-                "announcement_type": None,
-                "is_purchase_limit_announcement": False,
-                "confidence": 0.0,
-                "error": "Empty input text",
-            }
+            return [
+                {
+                    "ticker": None,
+                    "limit_amount": None,
+                    "start_date": None,
+                    "end_date": None,
+                    "announcement_type": None,
+                    "is_purchase_limit_announcement": False,
+                    "confidence": 0.0,
+                    "error": "Empty input text",
+                }
+            ]
 
         # Truncate long texts to prevent context window overflow
         truncated_text = text[:MAX_TEXT_LENGTH]
@@ -416,10 +494,21 @@ Return ONLY the JSON object, no additional explanation."""
                 f"Truncated input from {len(text)} to {MAX_TEXT_LENGTH} characters"
             )
 
+        # Build system prompt with ticker filtering
+        system_prompt = self._build_system_prompt(ticker)
+
+        # Build user message with optional ticker hint
+        if ticker:
+            user_content = (
+                f"你正在解析基金代码 {ticker} 的公告。文档内容如下：\n{truncated_text}"
+            )
+        else:
+            user_content = f"文档内容如下：\n{truncated_text}"
+
         # Build messages for the Chat API (system + user separation)
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"文档内容如下：\n{truncated_text}"},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
         ]
 
         try:
@@ -441,7 +530,35 @@ Return ONLY the JSON object, no additional explanation."""
             except (ValueError, json.JSONDecodeError) as e:
                 logger.error(f"Failed to extract JSON from LLM response: {e}")
                 logger.debug(f"Raw response: {llm_response_text[:500]}")
-                return {
+                return [
+                    {
+                        "ticker": None,
+                        "limit_amount": None,
+                        "start_date": None,
+                        "end_date": None,
+                        "announcement_type": None,
+                        "is_purchase_limit_announcement": False,
+                        "confidence": 0.0,
+                        "error": f"Invalid JSON in LLM response: {e}",
+                    }
+                ]
+
+            # Clean and validate the output (returns List[Dict])
+            cleaned = self._clean_output(parsed)
+
+            logger.info(
+                f"Successfully parsed announcement: {len(cleaned)} record(s), "
+                f"ticker={cleaned[0]['ticker']}, "
+                f"type={cleaned[0]['announcement_type']}, "
+                f"is_limit={cleaned[0]['is_purchase_limit_announcement']}"
+            )
+
+            return cleaned
+
+        except ollama.ResponseError as e:
+            logger.error(f"Ollama API error: {e}")
+            return [
+                {
                     "ticker": None,
                     "limit_amount": None,
                     "start_date": None,
@@ -449,75 +566,60 @@ Return ONLY the JSON object, no additional explanation."""
                     "announcement_type": None,
                     "is_purchase_limit_announcement": False,
                     "confidence": 0.0,
-                    "error": f"Invalid JSON in LLM response: {e}",
+                    "error": f"Ollama API error: {str(e)}",
                 }
-
-            # Clean and validate the output
-            cleaned = self._clean_output(parsed)
-
-            logger.info(
-                f"Successfully parsed announcement: ticker={cleaned['ticker']}, "
-                f"type={cleaned['announcement_type']}, "
-                f"is_limit={cleaned['is_purchase_limit_announcement']}"
-            )
-
-            return cleaned
-
-        except ollama.ResponseError as e:
-            logger.error(f"Ollama API error: {e}")
-            return {
-                "ticker": None,
-                "limit_amount": None,
-                "start_date": None,
-                "end_date": None,
-                "announcement_type": None,
-                "is_purchase_limit_announcement": False,
-                "confidence": 0.0,
-                "error": f"Ollama API error: {str(e)}",
-            }
+            ]
         except ConnectionError as e:
             host_display = self.host or "default (127.0.0.1:11434)"
             logger.error(f"Failed to connect to Ollama at {host_display}: {e}")
-            return {
-                "ticker": None,
-                "limit_amount": None,
-                "start_date": None,
-                "end_date": None,
-                "announcement_type": None,
-                "is_purchase_limit_announcement": False,
-                "confidence": 0.0,
-                "error": f"Connection error: Cannot connect to Ollama at {host_display}. "
-                f"Ensure Ollama is installed and running. Visit https://ollama.com for setup instructions.",
-            }
+            return [
+                {
+                    "ticker": None,
+                    "limit_amount": None,
+                    "start_date": None,
+                    "end_date": None,
+                    "announcement_type": None,
+                    "is_purchase_limit_announcement": False,
+                    "confidence": 0.0,
+                    "error": f"Connection error: Cannot connect to Ollama at {host_display}. "
+                    f"Ensure Ollama is installed and running. Visit https://ollama.com for setup instructions.",
+                }
+            ]
         except TimeoutError as e:
             logger.error(f"Request to Ollama timed out after {timeout}s: {e}")
-            return {
-                "ticker": None,
-                "limit_amount": None,
-                "start_date": None,
-                "end_date": None,
-                "announcement_type": None,
-                "is_purchase_limit_announcement": False,
-                "confidence": 0.0,
-                "error": f"Timeout error: Request took longer than {timeout} seconds",
-            }
+            return [
+                {
+                    "ticker": None,
+                    "limit_amount": None,
+                    "start_date": None,
+                    "end_date": None,
+                    "announcement_type": None,
+                    "is_purchase_limit_announcement": False,
+                    "confidence": 0.0,
+                    "error": f"Timeout error: Request took longer than {timeout} seconds",
+                }
+            ]
         except LLMError:
             raise
         except Exception as e:
             logger.error(f"Unexpected error during parsing: {e}")
-            return {
-                "ticker": None,
-                "limit_amount": None,
-                "start_date": None,
-                "end_date": None,
-                "announcement_type": None,
-                "is_purchase_limit_announcement": False,
-                "confidence": 0.0,
-                "error": f"Unexpected error: {str(e)}",
-            }
+            return [
+                {
+                    "ticker": None,
+                    "limit_amount": None,
+                    "start_date": None,
+                    "end_date": None,
+                    "announcement_type": None,
+                    "is_purchase_limit_announcement": False,
+                    "confidence": 0.0,
+                    "error": f"Unexpected error: {str(e)}",
+                }
+            ]
 
 
-def parse_announcement(text: str, **kwargs) -> Dict[str, Any]:
+def parse_announcement(
+    text: str, ticker: Optional[str] = None, **kwargs
+) -> List[Dict[str, Any]]:
     """
     Convenience function to parse announcement text using default client.
 
@@ -526,19 +628,20 @@ def parse_announcement(text: str, **kwargs) -> Dict[str, Any]:
 
     Args:
         text: The extracted text from the PDF announcement
+        ticker: Optional fund ticker code for filtering results to this ticker
         **kwargs: Additional arguments passed to LLMClient constructor
                   (base_url, model, etc.)
 
     Returns:
-        Dictionary containing extracted limit information
+        List of dictionaries containing extracted limit information
 
     Example:
-        >>> result = parse_announcement("本基金将于2024年1月1日起暂停大额申购...")
-        >>> print(result['is_purchase_limit_announcement'])
+        >>> result = parse_announcement("本基金将于2024年1月1日起暂停大额申购...", ticker="161005")
+        >>> print(result[0]['is_purchase_limit_announcement'])
         True
     """
     client = LLMClient(**kwargs)
-    return client.parse_announcement(text)
+    return client.parse_announcement(text, ticker=ticker)
 
 
 if __name__ == "__main__":
@@ -546,38 +649,40 @@ if __name__ == "__main__":
     CLI mode for testing the LLM client with a text file.
     
     Usage:
-        python src/data/llm_client.py extracted_text.txt
+        python src/data/llm_client.py extracted_text.txt [--ticker TICKER]
         
     The text file should contain the extracted text from a PDF announcement.
     """
-    if len(sys.argv) < 2:
-        print("Usage: python src/data/llm_client.py <text_file_path>")
-        print("\nExample:")
-        print("  python src/data/llm_client.py announcement_text.txt")
-        print("\nEnvironment Variables:")
-        print("  OLLAMA_HOST   - Ollama API URL (default: http://localhost:11434)")
-        print("  OLLAMA_MODEL  - Model name (default: qwen3:8b)")
-        sys.exit(1)
+    import argparse
 
-    text_file = sys.argv[1]
+    parser = argparse.ArgumentParser(
+        description="Parse fund announcement text with LLM"
+    )
+    parser.add_argument("text_file", help="Path to text file with announcement content")
+    parser.add_argument(
+        "--ticker", default=None, help="Fund ticker code to filter results"
+    )
+    args = parser.parse_args()
 
-    if not os.path.exists(text_file):
-        print(f"Error: File not found: {text_file}")
+    if not os.path.exists(args.text_file):
+        print(f"Error: File not found: {args.text_file}")
         sys.exit(1)
 
     # Read the text file
-    with open(text_file, "r", encoding="utf-8") as f:
+    with open(args.text_file, "r", encoding="utf-8") as f:
         text = f.read()
 
-    print(f"Processing file: {text_file}")
+    print(f"Processing file: {args.text_file}")
     print(f"Text length: {len(text)} characters")
+    if args.ticker:
+        print(f"Ticker filter: {args.ticker}")
     print("\n" + "=" * 60)
 
     # Parse the announcement
     try:
-        result = parse_announcement(text)
+        result = parse_announcement(text, ticker=args.ticker)
 
-        print("\nExtracted Information:")
+        print(f"\nExtracted {len(result)} record(s):")
         print(json.dumps(result, ensure_ascii=False, indent=2))
 
     except LLMError as e:
