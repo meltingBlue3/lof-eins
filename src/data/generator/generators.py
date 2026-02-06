@@ -211,7 +211,7 @@ class FundStatusGenerator:
                 ticker TEXT NOT NULL,
                 start_date DATE NOT NULL,
                 end_date DATE,  -- NULL indicates open-ended limit
-                max_amount REAL DEFAULT 100.0,
+                max_amount REAL NOT NULL,
                 reason TEXT,
                 source_announcement_ids TEXT DEFAULT '[]',
                 is_open_ended INTEGER GENERATED ALWAYS AS (
@@ -362,12 +362,13 @@ class FundStatusGenerator:
                     limit_start = None
 
         # Handle case where limit extends to end of data
+        # Use None for end_date to represent a genuinely open-ended limit
         if in_limit and limit_start:
             events.append(
                 {
                     "ticker": ticker,
                     "start_date": limit_start,
-                    "end_date": pd.Timestamp(dates[-1]).strftime("%Y-%m-%d"),
+                    "end_date": None,
                     "max_amount": self.config.limit_max_amount,
                     "reason": f"High premium (>{self.config.limit_trigger_threshold * 100:.0f}%) for {self.config.consecutive_days} consecutive days",
                 }

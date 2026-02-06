@@ -51,7 +51,7 @@ class TestDatabaseSchema(unittest.TestCase):
                 ticker TEXT NOT NULL,
                 start_date DATE NOT NULL,
                 end_date DATE,
-                max_amount REAL DEFAULT 100.0,
+                max_amount REAL NOT NULL,
                 reason TEXT,
                 source_announcement_ids TEXT DEFAULT '[]',
                 is_open_ended INTEGER GENERATED ALWAYS AS (
@@ -806,7 +806,7 @@ class TestDatabaseSchemaIntegration(unittest.TestCase):
                     ticker TEXT NOT NULL,
                     start_date DATE NOT NULL,
                     end_date DATE,
-                    max_amount REAL DEFAULT 100.0,
+                    max_amount REAL NOT NULL,
                     reason TEXT,
                     source_announcement_ids TEXT DEFAULT '[]',
                     is_open_ended INTEGER GENERATED ALWAYS AS (
