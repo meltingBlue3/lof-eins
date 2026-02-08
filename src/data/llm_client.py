@@ -516,7 +516,7 @@ Return ONLY the JSON array, no additional explanation."""
             response = self._client.chat(
                 model=self.model,
                 messages=messages,
-                format="json",
+                think=True,
             )
 
             # Extract the response content
@@ -545,6 +545,21 @@ Return ONLY the JSON array, no additional explanation."""
 
             # Clean and validate the output (returns List[Dict])
             cleaned = self._clean_output(parsed)
+
+            if not cleaned:
+                logger.warning("LLM returned empty result list")
+                return [
+                    {
+                        "ticker": None,
+                        "limit_amount": None,
+                        "start_date": None,
+                        "end_date": None,
+                        "announcement_type": None,
+                        "is_purchase_limit_announcement": False,
+                        "confidence": 0.0,
+                        "error": "LLM returned empty result list",
+                    }
+                ]
 
             logger.info(
                 f"Successfully parsed announcement: {len(cleaned)} record(s), "
