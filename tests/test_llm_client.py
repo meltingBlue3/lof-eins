@@ -668,6 +668,163 @@ class TestLLMClientIntegration(unittest.TestCase):
         )
 
 
+class TestLLMClientCloud(unittest.TestCase):
+    """Test cases for cloud (OpenAI-compatible) provider mode."""
+
+    def setUp(self):
+        """Set up test fixtures with mock JSON response."""
+        self.mock_json = json.dumps(
+            [
+                {
+                    "ticker": "161005",
+                    "limit_amount": 100.0,
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-03-01",
+                    "announcement_type": "complete",
+                    "is_purchase_limit_announcement": True,
+                    "confidence": 0.95,
+                }
+            ]
+        )
+
+    @patch.dict(
+        os.environ,
+        {"LLM_API_KEY": "sk-test-key", "LLM_URL": "https://api.test.com/v1"},
+        clear=False,
+    )
+    @patch("src.data.llm_client.OpenAI")
+    def test_cloud_mode_detected(self, MockOpenAI):
+        """When LLM_API_KEY env var is set, client uses cloud provider."""
+        mock_openai_instance = MagicMock()
+        MockOpenAI.return_value = mock_openai_instance
+
+        client = LLMClient()
+
+        self.assertEqual(client._provider, "cloud")
+        self.assertIsNotNone(client._openai_client)
+        self.assertIsNone(client._client)
+        self.assertEqual(client.host, "https://api.test.com/v1")
+        MockOpenAI.assert_called_once_with(
+            api_key="sk-test-key",
+            base_url="https://api.test.com/v1",
+        )
+
+    @patch("src.data.llm_client.OpenAI")
+    def test_cloud_mode_explicit_api_key(self, MockOpenAI):
+        """When api_key passed to constructor, uses cloud mode regardless of env."""
+        mock_openai_instance = MagicMock()
+        MockOpenAI.return_value = mock_openai_instance
+
+        client = LLMClient(
+            api_key="sk-explicit-key",
+            base_url="https://api.explicit.com/v1",
+        )
+
+        self.assertEqual(client._provider, "cloud")
+        self.assertEqual(client._api_key, "sk-explicit-key")
+        self.assertEqual(client.host, "https://api.explicit.com/v1")
+        MockOpenAI.assert_called_once_with(
+            api_key="sk-explicit-key",
+            base_url="https://api.explicit.com/v1",
+        )
+
+    def test_ollama_mode_when_no_api_key(self):
+        """When LLM_API_KEY not set, client uses ollama provider (existing behavior)."""
+        # Ensure LLM_API_KEY is not set
+        env = os.environ.copy()
+        env.pop("LLM_API_KEY", None)
+        with patch.dict(os.environ, env, clear=True):
+            client = LLMClient()
+
+            self.assertEqual(client._provider, "ollama")
+            self.assertIsNone(client._openai_client)
+            self.assertIsNotNone(client._client)
+
+    @patch.dict(
+        os.environ,
+        {"LLM_API_KEY": "sk-test-key", "LLM_URL": "https://api.test.com/v1"},
+        clear=False,
+    )
+    @patch("src.data.llm_client.OpenAI")
+    def test_cloud_parse_announcement_success(self, MockOpenAI):
+        """Cloud mode parse_announcement returns correct List[Dict]."""
+        mock_openai_instance = MagicMock()
+        MockOpenAI.return_value = mock_openai_instance
+
+        client = LLMClient()
+
+        # Mock the chat completions response
+        mock_resp = MagicMock()
+        mock_resp.choices[0].message.content = self.mock_json
+        client._openai_client.chat.completions.create.return_value = mock_resp
+
+        result = client.parse_announcement("Test announcement text")
+
+        # Verify result structure
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["ticker"], "161005")
+        self.assertEqual(result[0]["limit_amount"], 100.0)
+        self.assertEqual(result[0]["start_date"], "2024-01-01")
+        self.assertEqual(result[0]["end_date"], "2024-03-01")
+        self.assertEqual(result[0]["announcement_type"], "complete")
+        self.assertTrue(result[0]["is_purchase_limit_announcement"])
+        self.assertEqual(result[0]["confidence"], 0.95)
+
+        # Verify the openai client was called
+        client._openai_client.chat.completions.create.assert_called_once()
+        call_kwargs = client._openai_client.chat.completions.create.call_args[1]
+        self.assertEqual(call_kwargs["temperature"], 0.1)
+        self.assertIn("messages", call_kwargs)
+
+    @patch.dict(
+        os.environ,
+        {"LLM_API_KEY": "sk-test-key", "LLM_URL": "https://api.test.com/v1"},
+        clear=False,
+    )
+    @patch("src.data.llm_client.OpenAI")
+    def test_cloud_parse_announcement_api_error(self, MockOpenAI):
+        """Cloud mode returns error record when API raises exception."""
+        mock_openai_instance = MagicMock()
+        MockOpenAI.return_value = mock_openai_instance
+
+        client = LLMClient()
+
+        # Make the API call raise an exception
+        client._openai_client.chat.completions.create.side_effect = Exception(
+            "API rate limit exceeded"
+        )
+
+        result = client.parse_announcement("Test text")
+
+        # Should return error record, not raise
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
+        self.assertIn("error", result[0])
+        self.assertIn("API rate limit exceeded", result[0]["error"])
+        self.assertFalse(result[0]["is_purchase_limit_announcement"])
+
+    @patch.dict(
+        os.environ,
+        {
+            "LLM_API_KEY": "sk-test-key",
+            "LLM_URL": "https://api.test.com/v1",
+            "LLM_MODEL": "deepseek-chat",
+        },
+        clear=False,
+    )
+    @patch("src.data.llm_client.OpenAI")
+    def test_cloud_model_from_env(self, MockOpenAI):
+        """When LLM_MODEL env var set, it's used as model name in cloud mode."""
+        mock_openai_instance = MagicMock()
+        MockOpenAI.return_value = mock_openai_instance
+
+        client = LLMClient()
+
+        self.assertEqual(client._provider, "cloud")
+        self.assertEqual(client.model, "deepseek-chat")
+
+
 if __name__ == "__main__":
     # Run tests with verbosity
     unittest.main(verbosity=2)
