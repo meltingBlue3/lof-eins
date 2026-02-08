@@ -5,7 +5,7 @@
 **Phase:** 2 of 4 (PDF Processing)  
 **Plan:** 3 of 3 COMPLETE  
 **Status:** Phase 2 Complete - All PDF processing infrastructure ready  
-**Last activity:** 2026-02-08 - Completed quick-003: README Rewrite
+**Last activity:** 2026-02-09 - Completed quick-004: Refactor LLM Client Dual-Provider Support
 
 ---
 
@@ -39,6 +39,8 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | Use NULL for open-ended limits | Industry standard, semantically clear | 2026-02-06 |
 | Event sourcing pattern | Immutable audit trail, enables reprocessing | 2026-02-06 |
 | Local LLM (Ollama) vs Cloud API | Cost control, data privacy, offline capability | 2026-02-06 |
+| Dual-provider LLM (cloud + Ollama) | LLM_API_KEY presence auto-detects cloud mode, openai SDK with base_url | 2026-02-09 |
+| No load_dotenv() in LLMClient.__init__ | Preserves test isolation, caller loads .env | 2026-02-09 |
 | Three-table schema | Separation of concerns: raw/integrated/audit | 2026-02-06 |
 | O(n log n) merge algorithm | Optimal complexity, established pattern | 2026-02-06 |
 | YOLO mode with verification | Balance speed and quality | 2026-02-06 |
@@ -89,14 +91,15 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | 001 | Unify DB schema: end_date nullable | 2026-02-07 | 59acb75 | [001-unify-db-schema-end-date-nullable](./quick/001-unify-db-schema-end-date-nullable/) |
 | 002 | LLM multi-date single-ticker parsing | 2026-02-07 | 24371f5 | [002-llm-multi-date-single-ticker-parsing](./quick/002-llm-multi-date-single-ticker-parsing/) |
 | 003 | README rewrite (full project docs) | 2026-02-08 | e49fa40 | [003-readme-md](./quick/003-readme-md/) |
+| 004 | LLM client dual-provider (cloud + Ollama) | 2026-02-09 | 9d70d35 | [004-refactor-llm-client-dual-provider-support](./quick/004-refactor-llm-client-dual-provider-support/) |
 
 ---
 
 ## Session Continuity
 
-**Last session:** 2026-02-08  
-**Stopped at:** Completed quick-003: README Rewrite  
-**Resume file:** `.planning/quick/003-readme-md/003-SUMMARY.md`
+**Last session:** 2026-02-09  
+**Stopped at:** Completed quick-004: Refactor LLM Client Dual-Provider Support  
+**Resume file:** `.planning/quick/004-refactor-llm-client-dual-provider-support/004-SUMMARY.md`
 
 **Next action:** Begin Phase 3: Timeline Integration
 - Plan 03-01: Timeline integration algorithm (merge overlapping intervals)
@@ -120,6 +123,7 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | Quick 001 - Schema Unify | `.planning/quick/001-unify-db-schema-end-date-nullable/001-SUMMARY.md` |
 | Quick 002 - Multi-Date Parsing | `.planning/quick/002-llm-multi-date-single-ticker-parsing/002-SUMMARY.md` |
 | Quick 003 - README Rewrite | `.planning/quick/003-readme-md/003-SUMMARY.md` |
+| Quick 004 - Dual-Provider LLM | `.planning/quick/004-refactor-llm-client-dual-provider-support/004-SUMMARY.md` |
 
 ---
 
@@ -131,9 +135,9 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | test_database_schema.py | 47 | ✅ Pass |
 | test_loader.py | 4 checks | ✅ Pass |
 | test_pdf_extractor.py | 9 | ✅ Pass |
-| test_llm_client.py | 22 | ✅ Pass |
+| test_llm_client.py | 35 (29+6 cloud) | ✅ Pass |
 | test_announcement_processor.py | 13 | ✅ Pass |
-| **Total** | **103+** | **✅ All Pass** |
+| **Total** | **116+** | **✅ All Pass** |
 
 ---
 
@@ -201,7 +205,8 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 - **Quick-001:** Schema unified, migration scripts removed, generator fixed
 - **Quick-002:** LLM client returns List[Dict], supports multi-date/single-ticker parsing
 - **Quick-003:** README rewritten to reflect full project state (Phase 1-2 + pipeline docs)
+- **Quick-004:** LLMClient refactored for dual-provider (cloud OpenAI-compatible + local Ollama)
 
 ---
 
-*State updated: 2026-02-08 - Quick-003 COMPLETE, README rewritten (636 lines)*
+*State updated: 2026-02-09 - Quick-004 COMPLETE, LLMClient dual-provider support (cloud + Ollama)*
