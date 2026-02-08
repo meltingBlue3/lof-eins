@@ -1,24 +1,45 @@
 """
-Ollama LLM Client for parsing fund announcement PDFs.
+LLM Client for parsing fund announcement PDFs.
 
-This module provides an interface to a local Ollama LLM instance for extracting
-structured purchase limit information from fund announcement text.
+This module provides a dual-provider interface for extracting structured purchase
+limit information from fund announcement text:
 
-Setup:
-    1. Install Ollama from https://ollama.com
-    2. Pull a suitable model: `ollama pull qwen3:8b` (recommended for Chinese)
-    3. Ensure Ollama is running: `ollama serve` (or let it auto-start)
+1. **Cloud API mode** (OpenAI-compatible): Used when LLM_API_KEY env var is set.
+   Works with any OpenAI-compatible endpoint (Moonshot, DeepSeek, OpenAI, etc.)
+   via the ``openai`` Python SDK with configurable ``base_url``.
+
+2. **Local Ollama mode** (default fallback): Used when LLM_API_KEY is not set.
+   Connects to a local Ollama instance via the ``ollama`` Python SDK.
+
+Provider auto-detection: if ``LLM_API_KEY`` is set and non-empty, cloud mode is
+used; otherwise local Ollama mode is used.
 
 Environment Variables:
+    LLM_API_KEY: API key for cloud provider. If set, enables cloud mode.
+    LLM_URL: Base URL for cloud API (default: https://api.openai.com/v1)
+    LLM_MODEL: Model name override (used in both modes)
     OLLAMA_HOST: Base URL for Ollama API (default: http://localhost:11434)
-    OLLAMA_MODEL: Model name to use (default: qwen3:8b)
+    OLLAMA_MODEL: Model name for Ollama (default: qwen3:8b)
+
+Setup (Cloud API):
+    1. Set LLM_API_KEY and LLM_URL in .env
+    2. Optionally set LLM_MODEL to override the default model
+
+Setup (Local Ollama):
+    1. Install Ollama from https://ollama.com
+    2. Pull a suitable model: ``ollama pull qwen3:8b`` (recommended for Chinese)
+    3. Ensure Ollama is running: ``ollama serve`` (or let it auto-start)
 
 Example Usage:
     >>> from src.data.llm_client import LLMClient, parse_announcement
     >>>
-    >>> # Using the client class
+    >>> # Using the client class (auto-detects provider from env)
     >>> client = LLMClient()
     >>> result = client.parse_announcement(extracted_text)
+    >>>
+    >>> # Explicit cloud mode
+    >>> client = LLMClient(api_key="sk-xxx", base_url="https://api.moonshot.cn/v1")
+    >>> result = client.parse_announcement(extracted_text, ticker="161005")
     >>>
     >>> # Using the convenience function
     >>> result = parse_announcement(extracted_text, ticker="161005")
@@ -46,6 +67,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import ollama
+from openai import OpenAI
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -150,33 +172,71 @@ class LLMError(Exception):
 
 class LLMClient:
     """
-    Client for interacting with local Ollama LLM to parse fund announcements.
+    Dual-provider client for parsing fund announcements with LLMs.
 
-    Uses the ollama Python SDK with the Chat API for reliable instruction-following.
+    Supports two modes:
+    - **Cloud mode**: OpenAI-compatible API (Moonshot, DeepSeek, OpenAI, etc.)
+      Activated when ``api_key`` is provided or ``LLM_API_KEY`` env var is set.
+    - **Ollama mode**: Local Ollama instance (default fallback)
+      Used when no API key is available.
 
     Attributes:
-        host: The base URL for the Ollama API
+        host: The base URL for the API endpoint
         model: The model name to use for inference
     """
 
-    def __init__(self, base_url: Optional[str] = None, model: Optional[str] = None):
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ):
         """
-        Initialize the LLM client.
+        Initialize the LLM client with auto-detected provider.
 
         Args:
-            base_url: Ollama API base URL. If None, the ollama SDK uses its own
-                      default (reads OLLAMA_HOST env var, falls back to 127.0.0.1:11434).
-            model: Model name to use. Defaults to OLLAMA_MODEL env var or qwen3:8b.
+            base_url: API base URL. For cloud mode, defaults to LLM_URL env var.
+                      For Ollama mode, defaults to ollama SDK default.
+            model: Model name to use. Defaults to LLM_MODEL or OLLAMA_MODEL env var.
+            api_key: API key for cloud provider. If provided (or LLM_API_KEY env var
+                     is set and non-empty), cloud mode is activated.
         """
-        self.host = base_url  # None lets ollama SDK pick its default
-        self.model = model or os.getenv("OLLAMA_MODEL", DEFAULT_MODEL)
-        # Only pass host when explicitly set; otherwise let the SDK resolve it
-        # (avoids localhost → IPv6 issues on Windows)
-        if self.host:
-            self._client = ollama.Client(host=self.host)
+        # Determine provider: cloud if api_key provided or LLM_API_KEY env var set
+        # Note: Caller is responsible for loading .env (e.g., via dotenv.load_dotenv())
+        # before instantiating LLMClient if env-based config is desired.
+        self._api_key = api_key or os.getenv("LLM_API_KEY", "").strip() or None
+
+        if self._api_key:
+            # Cloud mode: OpenAI-compatible API
+            self._provider = "cloud"
+            self.host = base_url or os.getenv("LLM_URL", "https://api.openai.com/v1")
+            self.model = model or os.getenv("LLM_MODEL", "moonshot-v1-8k")
+            self._openai_client = OpenAI(
+                api_key=self._api_key,
+                base_url=self.host,
+            )
+            self._client = None  # No Ollama client needed
+            logger.info(
+                f"Initialized LLMClient in cloud mode: "
+                f"base_url={self.host}, model={self.model}"
+            )
         else:
-            self._client = ollama.Client()
-        logger.info(f"Initialized LLMClient with model {self.model}")
+            # Local mode: Ollama (existing behavior)
+            self._provider = "ollama"
+            self.host = base_url  # None lets ollama SDK pick its default
+            self.model = (
+                model
+                or os.getenv("LLM_MODEL")
+                or os.getenv("OLLAMA_MODEL", DEFAULT_MODEL)
+            )
+            # Only pass host when explicitly set; otherwise let the SDK resolve it
+            # (avoids localhost → IPv6 issues on Windows)
+            if self.host:
+                self._client = ollama.Client(host=self.host)
+            else:
+                self._client = ollama.Client()
+            self._openai_client = None
+            logger.info(f"Initialized LLMClient in ollama mode: model={self.model}")
 
     # Keep base_url as an alias for backward compatibility
     @property
@@ -444,14 +504,47 @@ Return ONLY the JSON array, no additional explanation."""
                 }
             ]
 
+    def _call_llm(self, messages: list) -> str:
+        """
+        Call the LLM API and return raw response text.
+
+        Dispatches to either OpenAI-compatible cloud API or local Ollama
+        based on the detected provider.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content' keys.
+
+        Returns:
+            Raw response text from the LLM.
+
+        Raises:
+            Various API-specific exceptions (handled by caller).
+        """
+        if self._provider == "cloud":
+            response = self._openai_client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.1,  # Low temp for structured extraction
+            )
+            return response.choices[0].message.content
+        else:
+            # Ollama mode (existing behavior)
+            response = self._client.chat(
+                model=self.model,
+                messages=messages,
+                think=True,
+            )
+            return response["message"]["content"]
+
     def parse_announcement(
         self, text: str, ticker: Optional[str] = None, timeout: int = 120
     ) -> List[Dict[str, Any]]:
         """
         Parse fund announcement text and extract structured limit information.
 
-        Uses the Ollama Chat API with system/user message separation for reliable
+        Uses the Chat API with system/user message separation for reliable
         instruction-following. Input text is truncated to prevent context overflow.
+        Dispatches to cloud or Ollama provider based on auto-detection.
 
         Args:
             text: The extracted text from the PDF announcement
@@ -512,15 +605,8 @@ Return ONLY the JSON array, no additional explanation."""
         ]
 
         try:
-            logger.debug(f"Sending chat request to Ollama")
-            response = self._client.chat(
-                model=self.model,
-                messages=messages,
-                think=True,
-            )
-
-            # Extract the response content
-            llm_response_text = response["message"]["content"]
+            logger.debug(f"Sending chat request via {self._provider} provider")
+            llm_response_text = self._call_llm(messages)
             logger.debug(f"Raw LLM response length: {len(llm_response_text)} chars")
 
             # Extract JSON from the response (handles thinking tokens, code blocks)
@@ -586,7 +672,9 @@ Return ONLY the JSON array, no additional explanation."""
             ]
         except ConnectionError as e:
             host_display = self.host or "default (127.0.0.1:11434)"
-            logger.error(f"Failed to connect to Ollama at {host_display}: {e}")
+            logger.error(
+                f"Failed to connect to {self._provider} at {host_display}: {e}"
+            )
             return [
                 {
                     "ticker": None,
@@ -596,12 +684,12 @@ Return ONLY the JSON array, no additional explanation."""
                     "announcement_type": None,
                     "is_purchase_limit_announcement": False,
                     "confidence": 0.0,
-                    "error": f"Connection error: Cannot connect to Ollama at {host_display}. "
-                    f"Ensure Ollama is installed and running. Visit https://ollama.com for setup instructions.",
+                    "error": f"Connection error: Cannot connect to {self._provider} at {host_display}. "
+                    f"Ensure the service is running and accessible.",
                 }
             ]
         except TimeoutError as e:
-            logger.error(f"Request to Ollama timed out after {timeout}s: {e}")
+            logger.error(f"Request timed out after {timeout}s: {e}")
             return [
                 {
                     "ticker": None,
@@ -617,7 +705,7 @@ Return ONLY the JSON array, no additional explanation."""
         except LLMError:
             raise
         except Exception as e:
-            logger.error(f"Unexpected error during parsing: {e}")
+            logger.error(f"Unexpected error during parsing ({self._provider}): {e}")
             return [
                 {
                     "ticker": None,
