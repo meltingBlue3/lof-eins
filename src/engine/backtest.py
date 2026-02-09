@@ -253,7 +253,7 @@ class BacktestEngine:
         Returns:
             Tuple of:
             - Dict mapping ticker to DataFrame with market data
-            - DatetimeIndex of aligned trading days (intersection)
+            - DatetimeIndex of aligned trading days (union of all tickers)
         """
         all_data: Dict[str, pd.DataFrame] = {}
         
@@ -271,19 +271,16 @@ class BacktestEngine:
             
             all_data[ticker] = df
         
-        # Find intersection of all trading days
+        # Find union of all trading days
         if not all_data:
             return {}, pd.DatetimeIndex([])
         
-        common_dates = None
+        all_dates: set = set()
         for df in all_data.values():
-            if common_dates is None:
-                common_dates = set(df.index)
-            else:
-                common_dates = common_dates.intersection(set(df.index))
+            all_dates = all_dates.union(set(df.index))
         
         # Sort dates
-        aligned_dates = pd.DatetimeIndex(sorted(common_dates))
+        aligned_dates = pd.DatetimeIndex(sorted(all_dates))
         
         return all_data, aligned_dates
     
@@ -334,6 +331,7 @@ class BacktestEngine:
         # Storage for results
         daily_records: List[Dict[str, Any]] = []
         trade_records: List[Dict[str, Any]] = []
+        last_known_prices: Dict[str, float] = {}
         
         # Main backtest loop
         for timestamp in aligned_dates:
@@ -406,17 +404,16 @@ class BacktestEngine:
                     trade_records.append(trade)
             
             # Step 4: Record daily performance
-            # Collect current prices for all tickers
-            prices: Dict[str, float] = {}
+            # Update forward-filled price cache with today's available closes
             for ticker in ticker_list:
                 if ticker in all_data and timestamp in all_data[ticker].index:
-                    prices[ticker] = all_data[ticker].loc[timestamp, 'close']
+                    last_known_prices[ticker] = all_data[ticker].loc[timestamp, 'close']
             
             daily_records.append({
                 'date': timestamp,
-                'total_assets': account.get_total_value(prices),
+                'total_assets': account.get_total_value(last_known_prices),
                 'cash': account.cash,
-                'positions_value': account.get_positions_value(prices),
+                'positions_value': account.get_positions_value(last_known_prices),
             })
         
         # Build result DataFrames
