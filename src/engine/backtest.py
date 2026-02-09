@@ -60,13 +60,20 @@ class BacktestResult:
             - cash: Cash balance
             - positions_value: Value of all positions across all tickers
         trade_logs: DataFrame of all executed trades with columns:
-            - date, action, ticker, shares, price, amount, fee, net_amount
+            - date, action, ticker, shares, price, amount, fee, net_amount,
+              premium_rate, cash_before, cash_after
+            - BUY-only columns: daily_limit, limit_cap, liquid_cap, cash_cap,
+              effective_cap
         config: The BacktestConfig used for this run.
+        daily_snapshots: Per-ticker daily position snapshots with columns:
+            - date, ticker, settled_shares, pending_shares, total_shares,
+              last_price, position_value
     """
     
     daily_perf: pd.DataFrame
     trade_logs: pd.DataFrame
     config: BacktestConfig
+    daily_snapshots: pd.DataFrame = field(default_factory=pd.DataFrame)
     _start_value: float = field(default=0.0, repr=False)
     _end_value: float = field(default=0.0, repr=False)
     
@@ -319,7 +326,8 @@ class BacktestEngine:
             return BacktestResult(
                 daily_perf=pd.DataFrame(),
                 trade_logs=pd.DataFrame(),
-                config=self.config
+                config=self.config,
+                daily_snapshots=pd.DataFrame(),
             )
         
         # Extract trading days as date objects
@@ -331,6 +339,7 @@ class BacktestEngine:
         # Storage for results
         daily_records: List[Dict[str, Any]] = []
         trade_records: List[Dict[str, Any]] = []
+        snapshot_records: List[Dict[str, Any]] = []
         last_known_prices: Dict[str, float] = {}
         
         # Main backtest loop
@@ -415,6 +424,22 @@ class BacktestEngine:
                 'cash': account.cash,
                 'positions_value': account.get_positions_value(last_known_prices),
             })
+            
+            # Record per-ticker position snapshots
+            for ticker in ticker_list:
+                settled = account.get_available_shares(ticker)
+                pending = account.get_pending_shares(ticker)
+                total = settled + pending
+                price = last_known_prices.get(ticker, 0.0)
+                snapshot_records.append({
+                    'date': timestamp,
+                    'ticker': ticker,
+                    'settled_shares': settled,
+                    'pending_shares': pending,
+                    'total_shares': total,
+                    'last_price': price,
+                    'position_value': total * price,
+                })
         
         # Build result DataFrames
         daily_perf = pd.DataFrame(daily_records)
@@ -422,11 +447,13 @@ class BacktestEngine:
             daily_perf.set_index('date', inplace=True)
         
         trade_logs = pd.DataFrame(trade_records)
+        daily_snapshots = pd.DataFrame(snapshot_records)
         
         return BacktestResult(
             daily_perf=daily_perf,
             trade_logs=trade_logs,
-            config=self.config
+            config=self.config,
+            daily_snapshots=daily_snapshots,
         )
     
     def _execute_sell(
@@ -464,6 +491,9 @@ class BacktestEngine:
         
         # Execute sell
         price = row['close']
+        premium_rate = row['premium_rate']
+        cash_before = account.cash
+        
         net_proceeds = account.sell(
             ticker=ticker,
             shares=shares_to_sell,
@@ -482,6 +512,9 @@ class BacktestEngine:
             'amount': shares_to_sell * price,
             'fee': commission,
             'net_amount': net_proceeds,
+            'premium_rate': premium_rate,
+            'cash_before': cash_before,
+            'cash_after': account.cash,
         }
     
     def _execute_buy(
@@ -562,6 +595,10 @@ class BacktestEngine:
         
         # Execute buy
         nav = row['nav']
+        premium_rate = row['premium_rate']
+        daily_limit = row['daily_limit']
+        cash_before = account.cash
+        
         shares = account.buy(
             ticker=ticker,
             amount=max_amount,
@@ -579,4 +616,12 @@ class BacktestEngine:
             'amount': max_amount,
             'fee': fee,
             'net_amount': max_amount - fee,
+            'premium_rate': premium_rate,
+            'daily_limit': daily_limit,
+            'limit_cap': limit_cap,
+            'liquid_cap': liquid_cap,
+            'cash_cap': cash_cap,
+            'effective_cap': min(limit_cap, liquid_cap, cash_cap),
+            'cash_before': cash_before,
+            'cash_after': account.cash,
         }

@@ -44,6 +44,9 @@ data/real_all_lof/
 *.log
 backtest_execution.log
 
+# Backtest output (exported CSVs)
+output/
+
 # Cursor IDE (but keep plans directory)
 .cursor/*
 !.cursor/plans/
