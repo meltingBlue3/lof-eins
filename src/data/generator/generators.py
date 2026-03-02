@@ -251,31 +251,6 @@ class FundStatusGenerator:
             ON announcement_parses(processed)
         """)
 
-        # Create limit_event_log table for audit trail of timeline changes
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS limit_event_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ticker TEXT NOT NULL,
-                operation TEXT NOT NULL,
-                old_start DATE,
-                old_end DATE,
-                new_start DATE,
-                new_end DATE,
-                triggered_by TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        # Create indexes for limit_event_log
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_limit_event_log_ticker
-            ON limit_event_log(ticker)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_limit_event_log_created_at
-            ON limit_event_log(created_at)
-        """)
-
         # Insert limit events with source_announcement_ids (empty array for mock data)
         for event in limit_events:
             cursor.execute(

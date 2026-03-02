@@ -236,12 +236,12 @@ class TestLLMClient(unittest.TestCase):
             self.assertEqual(result[0]["limit_amount"], 500.0)
 
     def test_prompt_building(self):
-        """Test that prompt is built correctly with examples."""
+        """Test that prompt is built correctly with Chinese instructions."""
         text = "Test announcement"
         prompt = self.client._build_prompt(text)
 
         # Check for required elements in prompt
-        self.assertIn("financial document parser", prompt)
+        self.assertIn("基金公告解析器", prompt)
         self.assertIn("JSON", prompt)
         self.assertIn("complete", prompt)
         self.assertIn("open-start", prompt)
@@ -249,18 +249,12 @@ class TestLLMClient(unittest.TestCase):
         self.assertIn("modify", prompt)
         self.assertIn("Test announcement", prompt)
 
-        # Check for example announcements (including new multi-date/multi-ticker)
-        self.assertIn("Example 1", prompt)
-        self.assertIn("Example 2", prompt)
-        self.assertIn("Example 3", prompt)
-        self.assertIn("Example 4", prompt)
-        self.assertIn("Example 5", prompt)
-
-        # Check for Chinese context
-        self.assertIn("Chinese", prompt)
+        # Check for noise handling instruction
+        self.assertIn("PDF", prompt)
+        self.assertIn("噪声", prompt)
 
         # Check for array output instruction
-        self.assertIn("JSON array", prompt)
+        self.assertIn("JSON 数组", prompt)
 
         # Test with ticker parameter
         prompt_with_ticker = self.client._build_prompt(text, ticker="161005")
@@ -567,16 +561,14 @@ class TestLLMClient(unittest.TestCase):
         """Test that _build_system_prompt includes ticker when provided."""
         prompt = self.client._build_system_prompt("161005")
         self.assertIn("161005", prompt)
-        self.assertIn("Only extract purchase limit information for THIS ticker", prompt)
+        self.assertIn("仅提取该基金的限购信息", prompt)
 
     def test_build_system_prompt_without_ticker(self):
         """Test that _build_system_prompt works without ticker."""
         prompt = self.client._build_system_prompt()
-        self.assertNotIn(
-            "Only extract purchase limit information for THIS ticker", prompt
-        )
+        self.assertNotIn("仅提取该基金的限购信息", prompt)
         # Should still have the array output format
-        self.assertIn("JSON array", prompt)
+        self.assertIn("JSON 数组", prompt)
 
 
 class TestLLMClientEnvironment(unittest.TestCase):
@@ -774,7 +766,6 @@ class TestLLMClientCloud(unittest.TestCase):
         # Verify the openai client was called
         client._openai_client.chat.completions.create.assert_called_once()
         call_kwargs = client._openai_client.chat.completions.create.call_args[1]
-        self.assertEqual(call_kwargs["temperature"], 0.1)
         self.assertIn("messages", call_kwargs)
 
     @patch.dict(

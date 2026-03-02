@@ -7,10 +7,23 @@ unified data access for backtesting.
 
 import sqlite3
 from pathlib import Path
-from typing import Optional, Dict, List
+from typing import Dict, List, NamedTuple, Optional
 
-import pandas as pd
 import numpy as np
+import pandas as pd
+
+
+class BundleResult(NamedTuple):
+    """Result of loading a ticker's data bundle.
+
+    Attributes:
+        df: DataFrame with market data (open, high, low, close, volume, nav,
+            premium_rate, daily_limit).
+        fee_config: Fee configuration dict for the ticker.
+    """
+
+    df: pd.DataFrame
+    fee_config: Dict[str, float]
 
 
 class DataLoader:
@@ -42,7 +55,7 @@ class DataLoader:
         ticker: str,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-    ) -> pd.DataFrame:
+    ) -> BundleResult:
         """Load and merge all data for a single ticker.
 
         Args:
@@ -51,9 +64,7 @@ class DataLoader:
             end_date: Optional end date filter (format: 'YYYY-MM-DD').
 
         Returns:
-            DataFrame indexed by date with columns:
-            open, high, low, close, volume, nav, premium_rate, daily_limit
-            Fee configuration is attached as DataFrame.attrs.
+            BundleResult with df (DataFrame indexed by date) and fee_config dict.
 
         Raises:
             FileNotFoundError: If market or NAV data files don't exist.
@@ -101,11 +112,10 @@ class DataLoader:
         if start_date is not None or end_date is not None:
             df = df.loc[start_date:end_date]
 
-        # Attach fee configuration as DataFrame attributes
+        # Load fee configuration
         fees = self.load_fees(ticker)
-        df.attrs.update(fees)
 
-        return df
+        return BundleResult(df=df, fee_config=fees)
 
     # Default fee configuration for LOF funds
     DEFAULT_FEES: Dict[str, float] = {

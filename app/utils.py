@@ -32,8 +32,10 @@ def load_bundle_cached(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> pd.DataFrame:
+    """Load ticker data bundle, returning only the DataFrame (for charts)."""
     loader = get_data_loader(data_dir)
-    return loader.load_bundle(ticker, start_date=start_date, end_date=end_date)
+    bundle = loader.load_bundle(ticker, start_date=start_date, end_date=end_date)
+    return bundle.df
 
 
 # ---------------------------------------------------------------------------
@@ -151,8 +153,8 @@ def trade_markers_chart(
 
     ticker_trades = trade_logs[trade_logs["ticker"] == ticker] if not trade_logs.empty else trade_logs
     if not ticker_trades.empty:
-        buys = ticker_trades[ticker_trades["action"] == "BUY"]
-        sells = ticker_trades[ticker_trades["action"] == "SELL"]
+        buys = ticker_trades[ticker_trades["action"] == "buy"]
+        sells = ticker_trades[ticker_trades["action"] == "sell"]
         if not buys.empty:
             fig.add_trace(go.Scatter(
                 x=buys["date"], y=buys["price"],

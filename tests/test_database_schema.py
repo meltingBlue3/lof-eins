@@ -1,7 +1,7 @@
 """
 Database schema validation tests for LOF Fund Arbitrage Backtesting System.
 
-Tests verify that all three tables (limit_events, announcement_parses, limit_event_log)
+Tests verify that tables (limit_events, announcement_parses)
 have correct schema including:
 - Proper columns with correct types
 - Nullable vs non-nullable fields
@@ -89,31 +89,6 @@ class TestDatabaseSchema(unittest.TestCase):
         self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_announcement_parses_processed
             ON announcement_parses(processed)
-        """)
-
-        # limit_event_log table
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS limit_event_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ticker TEXT NOT NULL,
-                operation TEXT NOT NULL,
-                old_start DATE,
-                old_end DATE,
-                new_start DATE,
-                new_end DATE,
-                triggered_by TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        # Indexes for limit_event_log
-        self.cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_limit_event_log_ticker
-            ON limit_event_log(ticker)
-        """)
-        self.cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_limit_event_log_created_at
-            ON limit_event_log(created_at)
         """)
 
         self.conn.commit()
@@ -580,188 +555,15 @@ class TestDatabaseSchema(unittest.TestCase):
         self.assertEqual(result, json_data, "JSON data should be stored correctly")
 
     # =========================================================================
-    # limit_event_log Schema Tests
-    # =========================================================================
-
-    def test_limit_event_log_table_exists(self):
-        """Test that limit_event_log table exists."""
-        self.cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='limit_event_log'"
-        )
-        result = self.cursor.fetchone()
-        self.assertIsNotNone(result, "limit_event_log table should exist")
-
-    def test_limit_event_log_required_columns(self):
-        """Test that limit_event_log has all required columns."""
-        required_columns = [
-            "id",
-            "ticker",
-            "operation",
-            "old_start",
-            "old_end",
-            "new_start",
-            "new_end",
-            "triggered_by",
-            "created_at",
-        ]
-
-        info = self._get_table_info("limit_event_log")
-        column_names = [row[1] for row in info]
-
-        for col in required_columns:
-            self.assertIn(
-                col, column_names, f"Column '{col}' should exist in limit_event_log"
-            )
-
-    def test_limit_event_log_id_column(self):
-        """Test id column in limit_event_log."""
-        info = self._get_table_info("limit_event_log")
-        id_col = [row for row in info if row[1] == "id"][0]
-
-        self.assertEqual(id_col[2], "INTEGER", "id should be INTEGER")
-        self.assertEqual(id_col[5], 1, "id should be primary key")
-
-    def test_limit_event_log_ticker_not_null(self):
-        """Test ticker column: TEXT NOT NULL."""
-        info = self._get_table_info("limit_event_log")
-        ticker_col = [row for row in info if row[1] == "ticker"][0]
-
-        self.assertEqual(ticker_col[2], "TEXT", "ticker should be TEXT")
-        self.assertEqual(ticker_col[3], 1, "ticker should be NOT NULL")
-
-    def test_limit_event_log_operation_not_null(self):
-        """Test operation column: TEXT NOT NULL."""
-        info = self._get_table_info("limit_event_log")
-        op_col = [row for row in info if row[1] == "operation"][0]
-
-        self.assertEqual(op_col[2], "TEXT", "operation should be TEXT")
-        self.assertEqual(op_col[3], 1, "operation should be NOT NULL")
-
-    def test_limit_event_log_date_columns_nullable(self):
-        """Test that old/new date columns are nullable."""
-        nullable_date_cols = ["old_start", "old_end", "new_start", "new_end"]
-        info = self._get_table_info("limit_event_log")
-
-        for col_name in nullable_date_cols:
-            col = [row for row in info if row[1] == col_name][0]
-            self.assertEqual(col[2], "DATE", f"{col_name} should be DATE")
-            self.assertEqual(col[3], 0, f"{col_name} should be nullable")
-
-    def test_limit_event_log_triggered_by_nullable(self):
-        """Test triggered_by column: TEXT (nullable)."""
-        info = self._get_table_info("limit_event_log")
-        trig_col = [row for row in info if row[1] == "triggered_by"][0]
-
-        self.assertEqual(trig_col[2], "TEXT", "triggered_by should be TEXT")
-        self.assertEqual(trig_col[3], 0, "triggered_by should be nullable")
-
-    def test_limit_event_log_created_at_default(self):
-        """Test created_at column: TIMESTAMP DEFAULT CURRENT_TIMESTAMP."""
-        info = self._get_table_info("limit_event_log")
-        created_col = [row for row in info if row[1] == "created_at"][0]
-
-        self.assertEqual(
-            created_col[4],
-            "CURRENT_TIMESTAMP",
-            "created_at should DEFAULT CURRENT_TIMESTAMP",
-        )
-
-    def test_limit_event_log_indexes_exist(self):
-        """Test that required indexes exist on limit_event_log."""
-        indexes = self._get_indexes("limit_event_log")
-        index_names = [idx[0] for idx in indexes]
-
-        self.assertIn(
-            "idx_limit_event_log_ticker", index_names, "Index on ticker should exist"
-        )
-        self.assertIn(
-            "idx_limit_event_log_created_at",
-            index_names,
-            "Index on created_at should exist",
-        )
-
-    def test_limit_event_log_insert_minimal(self):
-        """Test inserting minimal required fields succeeds."""
-        self.cursor.execute(
-            """INSERT INTO limit_event_log (ticker, operation)
-            VALUES (?, ?)""",
-            ("TEST", "INSERT"),
-        )
-        self.conn.commit()
-
-        self.cursor.execute(
-            """SELECT old_start, old_end, new_start, new_end, triggered_by, created_at
-            FROM limit_event_log WHERE ticker=?""",
-            ("TEST",),
-        )
-        row = self.cursor.fetchone()
-
-        self.assertIsNone(row[0], "old_start should be NULL")
-        self.assertIsNone(row[1], "old_end should be NULL")
-        self.assertIsNone(row[2], "new_start should be NULL")
-        self.assertIsNone(row[3], "new_end should be NULL")
-        self.assertIsNone(row[4], "triggered_by should be NULL")
-        self.assertIsNotNone(row[5], "created_at should be auto-populated")
-
-    def test_limit_event_log_insert_full(self):
-        """Test inserting full audit record with all dates."""
-        self.cursor.execute(
-            """INSERT INTO limit_event_log 
-            (ticker, operation, old_start, old_end, new_start, new_end, triggered_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                "TEST",
-                "UPDATE",
-                "2024-01-01",
-                "2024-01-31",
-                "2024-01-01",
-                None,
-                "manual",
-            ),
-        )
-        self.conn.commit()
-
-        self.cursor.execute(
-            """SELECT * FROM limit_event_log WHERE ticker=?""", ("TEST",)
-        )
-        row = self.cursor.fetchone()
-
-        self.assertEqual(row[1], "TEST", "ticker should be stored")
-        self.assertEqual(row[2], "UPDATE", "operation should be stored")
-        self.assertEqual(row[3], "2024-01-01", "old_start should be stored")
-        self.assertEqual(row[4], "2024-01-31", "old_end should be stored")
-        self.assertEqual(row[5], "2024-01-01", "new_start should be stored")
-        self.assertIsNone(row[6], "new_end should be NULL (open-ended)")
-        self.assertEqual(row[7], "manual", "triggered_by should be stored")
-
-    def test_limit_event_log_insert_null_required_fails(self):
-        """Test inserting NULL into required fields fails."""
-        # Test NULL ticker
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.cursor.execute(
-                """INSERT INTO limit_event_log (ticker, operation)
-                VALUES (?, ?)""",
-                (None, "INSERT"),
-            )
-
-        # Test NULL operation
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.cursor.execute(
-                """INSERT INTO limit_event_log (ticker, operation)
-                VALUES (?, ?)""",
-                ("TEST", None),
-            )
-
-    # =========================================================================
     # Cross-Table Integrity Tests
     # =========================================================================
 
     def test_all_tables_exist(self):
-        """Test that all three required tables exist."""
+        """Test that all required tables exist."""
         self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = [row[0] for row in self.cursor.fetchall()]
 
-        required_tables = ["limit_events", "announcement_parses", "limit_event_log"]
+        required_tables = ["limit_events", "announcement_parses"]
         for table in required_tables:
             self.assertIn(table, tables, f"Table '{table}' should exist")
 
@@ -776,8 +578,6 @@ class TestDatabaseSchema(unittest.TestCase):
             ("idx_limit_events_is_open_ended", "limit_events"),
             ("idx_announcement_parses_ticker", "announcement_parses"),
             ("idx_announcement_parses_processed", "announcement_parses"),
-            ("idx_limit_event_log_ticker", "limit_event_log"),
-            ("idx_limit_event_log_created_at", "limit_event_log"),
         ]
 
         for idx_name, table_name in expected_indexes:

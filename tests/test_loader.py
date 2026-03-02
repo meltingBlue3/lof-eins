@@ -56,7 +56,7 @@ def verify_limit_logic(df, ticker):
 
     # 找一条该 ticker 的限购记录
     event = pd.read_sql(
-        f"SELECT * FROM limit_events WHERE ticker='{ticker}' LIMIT 1", conn
+        "SELECT * FROM limit_events WHERE ticker=? LIMIT 1", conn, params=(ticker,)
     )
     conn.close()
 

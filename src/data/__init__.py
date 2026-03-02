@@ -4,7 +4,7 @@ Data module for LOF backtesting system.
 Includes data loading, mock data generation, and real data download capabilities.
 """
 
-from .loader import DataLoader
+from .loader import BundleResult, DataLoader
 from .generator import MockConfig, generate_mock_data
 
 # Conditional import for downloader (requires jqdatasdk)
@@ -16,7 +16,7 @@ except ImportError:
     RealDataDownloader = None  # type: ignore
     download_all_lof = None  # type: ignore
 
-__all__ = ["DataLoader", "MockConfig", "generate_mock_data"]
+__all__ = ["BundleResult", "DataLoader", "MockConfig", "generate_mock_data"]
 
 if _DOWNLOADER_AVAILABLE:
     __all__.extend(["RealDataDownloader", "download_all_lof"])

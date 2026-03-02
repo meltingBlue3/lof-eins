@@ -148,7 +148,7 @@ class TestOpenEndedLimits(unittest.TestCase):
 
         # Load data
         loader = DataLoader(str(self.data_dir))
-        df = loader.load_bundle(self.ticker)
+        df = loader.load_bundle(self.ticker).df
 
         # Verify: Before Feb 15, no limit (inf)
         before_limit = df.loc["2024-01-01":"2024-02-14"]
@@ -185,7 +185,7 @@ class TestOpenEndedLimits(unittest.TestCase):
 
         # Load data
         loader = DataLoader(str(self.data_dir))
-        df = loader.load_bundle(self.ticker)
+        df = loader.load_bundle(self.ticker).df
 
         # Verify: Before Feb 15, no limit
         before_limit = df.loc["2024-01-01":"2024-02-14"]
@@ -235,7 +235,7 @@ class TestOpenEndedLimits(unittest.TestCase):
 
         # Load data
         loader = DataLoader(str(self.data_dir))
-        df = loader.load_bundle(self.ticker)
+        df = loader.load_bundle(self.ticker).df
 
         # Verify: Jan 15-31 has first limit
         jan_limit = df.loc["2024-01-15":"2024-01-31"]
@@ -279,7 +279,7 @@ class TestOpenEndedLimits(unittest.TestCase):
 
         # Load data
         loader = DataLoader(str(self.data_dir))
-        df = loader.load_bundle(self.ticker)
+        df = loader.load_bundle(self.ticker).df
 
         # Verify: All dates should have the limit
         self.assertTrue(
@@ -299,7 +299,7 @@ class TestOpenEndedLimits(unittest.TestCase):
 
         # Load data
         loader = DataLoader(str(self.data_dir))
-        df = loader.load_bundle(self.ticker)
+        df = loader.load_bundle(self.ticker).df
 
         # Verify: All dates should have no limit (inf)
         self.assertTrue(
@@ -332,7 +332,7 @@ class TestOpenEndedLimits(unittest.TestCase):
 
         # Load data
         loader = DataLoader(str(self.data_dir))
-        df = loader.load_bundle(self.ticker)
+        df = loader.load_bundle(self.ticker).df
 
         # Verify: Feb has first limit
         feb = df.loc["2024-02-01":"2024-02-29"]
@@ -387,7 +387,7 @@ class TestOpenEndedLimits(unittest.TestCase):
 
         # Load data
         loader = DataLoader(str(self.data_dir))
-        df = loader.load_bundle(self.ticker)
+        df = loader.load_bundle(self.ticker).df
 
         # Verify: Mar onwards should have limit
         mar_onwards = df.loc["2024-03-01":"2024-06-30"]
@@ -477,7 +477,7 @@ class TestOpenEndedLimits(unittest.TestCase):
         loader = DataLoader(str(self.data_dir))
         df_filtered = loader.load_bundle(
             self.ticker, start_date="2024-03-01", end_date="2024-04-30"
-        )
+        ).df
 
         # Verify: All filtered dates are within open-ended limit
         self.assertTrue(
@@ -540,14 +540,14 @@ class TestOpenEndedLimits(unittest.TestCase):
         loader = DataLoader(str(self.data_dir))
 
         # TICKA: Feb onwards has open-ended limit
-        df_a = loader.load_bundle("TICKA")
+        df_a = loader.load_bundle("TICKA").df
         self.assertTrue(
             (df_a.loc["2024-02-01":"2024-06-30", "daily_limit"] == 100.0).all(),
             "TICKA should have open-ended limit",
         )
 
         # TICKB: Mar-Apr has limit, May onwards is unlimited
-        df_b = loader.load_bundle("TICKB")
+        df_b = loader.load_bundle("TICKB").df
         self.assertTrue(
             (df_b.loc["2024-03-01":"2024-04-30", "daily_limit"] == 200.0).all(),
             "TICKB should have closed limit Mar-Apr",
@@ -658,7 +658,7 @@ class TestOpenEndedLimitsEdgeCases(unittest.TestCase):
         conn.close()
 
         loader = DataLoader(str(self.data_dir))
-        df = loader.load_bundle(self.ticker)
+        df = loader.load_bundle(self.ticker).df
 
         # All dates should have limit
         self.assertTrue(
@@ -739,7 +739,7 @@ class TestOpenEndedLimitsEdgeCases(unittest.TestCase):
         conn.close()
 
         loader = DataLoader(str(self.data_dir))
-        df = loader.load_bundle(self.ticker)
+        df = loader.load_bundle(self.ticker).df
 
         # Verify split
         self.assertEqual(df.loc["2024-01-01", "daily_limit"], float("inf"))

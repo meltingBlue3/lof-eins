@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import BacktestConfig
-from src.data.loader import DataLoader
+from src.data.loader import DataLoader, BundleResult
 from src.engine.account import Account
 from src.strategy.base import BaseStrategy, Signal
 
@@ -249,47 +249,51 @@ class BacktestEngine:
         tickers: List[str],
         start_date: Optional[str],
         end_date: Optional[str]
-    ) -> Tuple[Dict[str, pd.DataFrame], pd.DatetimeIndex]:
+    ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, Dict[str, Any]], pd.DatetimeIndex]:
         """Load data for multiple tickers and align dates.
-        
+
         Args:
             tickers: List of fund ticker symbols.
             start_date: Optional start date filter (YYYY-MM-DD).
             end_date: Optional end date filter (YYYY-MM-DD).
-            
+
         Returns:
             Tuple of:
             - Dict mapping ticker to DataFrame with market data
+            - Dict mapping ticker to fee configuration
             - DatetimeIndex of aligned trading days (union of all tickers)
         """
         all_data: Dict[str, pd.DataFrame] = {}
-        
+        all_fees: Dict[str, Dict[str, Any]] = {}
+
         for ticker in tickers:
-            df = self.data_loader.load_bundle(ticker, start_date, end_date)
-            
+            bundle = self.data_loader.load_bundle(ticker, start_date, end_date)
+            df = bundle.df
+            all_fees[ticker] = bundle.fee_config
+
             # Pre-compute MA5 volume
             if self.config.use_ma5_liquidity:
                 df['ma5_volume'] = df['volume'].rolling(5, min_periods=1).mean()
             else:
                 df['ma5_volume'] = df['volume']
-            
+
             # Add ticker column
             df['ticker'] = ticker
-            
+
             all_data[ticker] = df
         
         # Find union of all trading days
         if not all_data:
-            return {}, pd.DatetimeIndex([])
-        
+            return {}, {}, pd.DatetimeIndex([])
+
         all_dates: set = set()
         for df in all_data.values():
             all_dates = all_dates.union(set(df.index))
-        
+
         # Sort dates
         aligned_dates = pd.DatetimeIndex(sorted(all_dates))
-        
-        return all_data, aligned_dates
+
+        return all_data, all_fees, aligned_dates
     
     def run(
         self,
@@ -319,7 +323,7 @@ class BacktestEngine:
             ticker_list = list(tickers)
         
         # Load all data and align dates
-        all_data, aligned_dates = self._load_multi_data(ticker_list, start_date, end_date)
+        all_data, all_fees, aligned_dates = self._load_multi_data(ticker_list, start_date, end_date)
         
         if not all_data or len(aligned_dates) == 0:
             logger.warning("No data available for tickers: %s", ticker_list)
@@ -349,7 +353,10 @@ class BacktestEngine:
             # Step 1: Settle T+2 positions
             account.update_date(current_date)
             
-            # Step 2: SELL Phase - sell all positions that have available shares
+            # Step 2: SELL Phase - sell all settled (T+2) shares immediately.
+            # This is intentional: LOF arbitrage buys off-exchange at NAV on day T,
+            # shares settle on T+2, then are sold on-exchange at market price on T+2.
+            # Only settled shares are sold; shares bought on T+1 remain pending.
             for ticker in ticker_list:
                 if ticker not in all_data or timestamp not in all_data[ticker].index:
                     continue
@@ -385,7 +392,7 @@ class BacktestEngine:
                         'ticker': ticker,
                         'premium_rate': premium_rate,
                         'row': row,
-                        'attrs': all_data[ticker].attrs
+                        'fee_config': all_fees.get(ticker, {}),
                     })
             
             # Sort by premium_rate descending (highest first)
@@ -405,7 +412,7 @@ class BacktestEngine:
                     account=account,
                     signal=signal,
                     row=candidate['row'],
-                    df_attrs=candidate['attrs'],
+                    fee_config=candidate['fee_config'],
                     trading_days=trading_days,
                     current_date=current_date
                 )
@@ -522,25 +529,25 @@ class BacktestEngine:
         account: Account,
         signal: Signal,
         row: pd.Series,
-        df_attrs: Dict[str, Any],
+        fee_config: Dict[str, Any],
         trading_days: List[date],
         current_date: date
     ) -> Optional[Dict[str, Any]]:
         """Execute a buy order with constraints.
-        
+
         Constraints (take minimum):
         - limit_cap: row['daily_limit'] (SQLite limit event)
         - liquid_cap: min(volume, ma5_volume) * liquidity_ratio
         - cash_cap: account.cash (if risk_mode == 'fixed')
-        
+
         Args:
             account: Account instance.
             signal: Buy signal.
             row: Current market data row.
-            df_attrs: DataFrame attrs with fee configuration.
+            fee_config: Fee configuration dict for the ticker.
             trading_days: List of trading days for T+2 calculation.
             current_date: Current simulation date.
-            
+
         Returns:
             Trade record dict, or None if no trade executed.
         """
@@ -583,7 +590,7 @@ class BacktestEngine:
         max_amount = min(max_amount, account.cash)
         
         # Calculate fee
-        fee = calculate_subscription_fee(max_amount, df_attrs)
+        fee = calculate_subscription_fee(max_amount, fee_config)
         
         # Ensure amount covers fee
         if max_amount <= fee:

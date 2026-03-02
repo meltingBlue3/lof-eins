@@ -5,6 +5,8 @@ Main entry point for LOF mock data generation.
 from pathlib import Path
 from typing import Optional
 
+import pandas as pd
+
 from .config import MockConfig
 from .generators import (
     NAVGenerator,
@@ -14,21 +16,25 @@ from .generators import (
 )
 
 
-def generate_mock_data(config: Optional[MockConfig] = None) -> None:
+def generate_mock_data(
+    config: Optional[MockConfig] = None,
+    output_dir: Optional[str] = None,
+) -> None:
     """Generate complete mock dataset for LOF fund backtesting.
-    
+
     This function orchestrates the generation of:
     - NAV data (parquet files per ticker)
     - Market data (parquet files per ticker)
     - Fee configuration (CSV file)
     - Fund status events (SQLite database)
-    
+
     Args:
         config: MockConfig instance. If None, uses default configuration.
+        output_dir: Output directory path. If None, defaults to "data/mock".
     """
     if config is None:
         config = MockConfig()
-    
+
     print("=" * 70)
     print("LOF Mock Data Generator")
     print("=" * 70)
@@ -40,9 +46,9 @@ def generate_mock_data(config: Optional[MockConfig] = None) -> None:
     print(f"  Limit Release Threshold: {config.limit_release_threshold*100:.1f}%")
     print(f"  Consecutive Days: {config.consecutive_days}")
     print("=" * 70)
-    
+
     # Create output directories
-    base_dir = Path("data/mock")
+    base_dir = Path(output_dir) if output_dir else Path("data/mock")
     market_dir = base_dir / "market"
     nav_dir = base_dir / "nav"
     config_dir = base_dir / "config"
@@ -118,14 +124,13 @@ def _print_summary_statistics(
     total_limit_events: int
 ) -> None:
     """Print summary statistics of generated data.
-    
+
     Args:
         config: Configuration used for generation.
         market_dir: Directory containing market data files.
         nav_dir: Directory containing NAV data files.
         total_limit_events: Total number of limit events generated.
     """
-    import pandas as pd
     
     print(f"  Total Tickers: {len(config.tickers)}")
     print(f"  Total Limit Events: {total_limit_events}")

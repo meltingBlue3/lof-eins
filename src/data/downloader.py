@@ -350,44 +350,6 @@ class RealDataDownloader:
         conn.commit()
         conn.close()
 
-    def _create_limit_event_log_table(self) -> None:
-        """Create limit_event_log table for audit trail of timeline changes.
-
-        This table provides an audit trail for debugging timeline changes
-        in the purchase limit processing pipeline.
-        """
-        db_path = self.config_dir / "fund_status.db"
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        # Create limit_event_log table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS limit_event_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ticker TEXT NOT NULL,
-                operation TEXT NOT NULL,
-                old_start DATE,
-                old_end DATE,
-                new_start DATE,
-                new_end DATE,
-                triggered_by TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        # Create indexes for query performance
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_limit_event_log_ticker
-            ON limit_event_log(ticker)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_limit_event_log_created_at
-            ON limit_event_log(created_at)
-        """)
-
-        conn.commit()
-        conn.close()
-
     def download(
         self, start_date: str, end_date: str, codes: Optional[List[str]] = None
     ) -> Tuple[int, List[str]]:
@@ -453,7 +415,6 @@ class RealDataDownloader:
             self._generate_fee_config(all_processed_tickers)
             self._generate_limit_db()
             self._create_announcement_parses_table()
-            self._create_limit_event_log_table()
             print(f"\n[SUCCESS] Download complete! Data path: {self.output_dir}")
         else:
             print("\n[WARN] No valid data downloaded.")

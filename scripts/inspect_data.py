@@ -12,7 +12,7 @@ import os
 
 # ================= 配置项 =================
 # 随便选一个你生成了数据的 Ticker
-TICKER = '161005' 
+TICKER = '162411' 
 DATA_DIR = './data/mock'
 # =========================================
 
@@ -22,12 +22,14 @@ def load_data(ticker):
     if not os.path.exists(price_path):
         raise FileNotFoundError(f"找不到行情文件: {price_path}")
     df_price = pd.read_parquet(price_path)
+    print(f"行情数据样例:\n{df_price}\n")
 
     # 2. 读取净值 (NAV)
     nav_path = f"{DATA_DIR}/nav/{ticker}.parquet"
     if not os.path.exists(nav_path):
         raise FileNotFoundError(f"找不到净值文件: {nav_path}")
     df_nav = pd.read_parquet(nav_path)
+    print(f"净值数据样例:\n{df_nav}\n")
 
     # 合并数据
     df = pd.merge(df_price, df_nav, left_index=True, right_index=True, how='inner')
@@ -44,8 +46,8 @@ def load_limits(ticker):
         return pd.DataFrame()
     
     conn = sqlite3.connect(db_path)
-    query = f"SELECT * FROM limit_events WHERE ticker = '{ticker}'"
-    df_limits = pd.read_sql(query, conn)
+    query = "SELECT * FROM limit_events WHERE ticker = ?"
+    df_limits = pd.read_sql(query, conn, params=(str(ticker),))
     conn.close()
     
     # 转换日期格式
@@ -108,7 +110,7 @@ if __name__ == "__main__":
         print(f"检测到的 Mock 数据文件: {files}")
         
         # 默认画第一个
-        first_ticker = files[0].replace('.parquet', '')
+        first_ticker = "161005"
         print(f"正在绘图: {first_ticker} ...")
         plot_dashboard(first_ticker)
     except Exception as e:
