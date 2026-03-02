@@ -54,3 +54,8 @@ output/
 # OS
 .DS_Store
 Thumbs.db
+
+# Spec Kit
+.opencode
+.specify/scripts/
+.specify/templates/

@@ -64,6 +64,7 @@ import os
 import re
 import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import ollama
@@ -76,92 +77,33 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL = "qwen3:8b"  # Good for Chinese text processing
 MAX_TEXT_LENGTH = 8000  # Truncate input text to prevent context window overflow
 
-# System prompt template: instructions, schema, and few-shot examples
+# Prompt directory: <project_root>/prompts/
+_PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
+
+
+def _load_prompt(name: str) -> str:
+    """
+    Load a prompt template from the prompts/ directory.
+
+    Args:
+        name: Filename (without path) inside the prompts/ directory,
+              e.g. "system_prompt.md".
+
+    Returns:
+        The file content as a string.
+
+    Raises:
+        FileNotFoundError: If the prompt file does not exist.
+    """
+    path = _PROMPTS_DIR / name
+    if not path.exists():
+        raise FileNotFoundError(f"Prompt file not found: {path}")
+    return path.read_text(encoding="utf-8")
+
+
+# System prompt template: loaded from prompts/system_prompt.md
 # Contains {ticker_instruction} placeholder filled by _build_system_prompt()
-SYSTEM_PROMPT_TEMPLATE = """You are a financial document parser specializing in Chinese fund announcements.
-
-Your task is to extract purchase limit information from the provided fund announcement text.
-Analyze the text carefully and return a JSON **array** of records with the extracted information.
-{ticker_instruction}
-
-**Output Format (JSON array):**
-```json
-[
-    {{
-        "ticker": "string or null - Fund ticker code (e.g., '161005')",
-        "limit_amount": "number or null - Maximum purchase amount in CNY (e.g., 100.0 for 100元)",
-        "start_date": "YYYY-MM-DD or null - Limit start date",
-        "end_date": "YYYY-MM-DD or null - Limit end date",
-        "announcement_type": "complete|open-start|end-only|modify|null",
-        "is_purchase_limit_announcement": "boolean - true if this is a purchase limit announcement",
-        "confidence": "number 0-1 - Confidence score for this extraction"
-    }}
-]
-```
-
-**Multi-date handling:** If the announcement specifies multiple non-consecutive dates (e.g., "4月18日、4月21日、7月1日"), create a SEPARATE record for each date or consecutive date range. Consecutive dates (e.g., "12月25日、26日") should be merged into one record with start_date and end_date.
-
-**Announcement Type Definitions:**
-1. **complete**: Has both start_date and end_date (完整公告 - 限购开始和结束日期都明确)
-2. **open-start**: Only has end_date, limit is already active (开放开始 - 已经开始，只告知结束日期)
-3. **end-only**: Announces end/closing of an existing limit (仅结束 - 宣布取消或结束限购)
-4. **modify**: Changes parameters of an existing limit (修改 - 修改限购金额或日期)
-
-**Field Guidelines:**
-- ticker: Extract fund code if present, otherwise null
-- limit_amount: Numeric value only (e.g., 100 for "100元"), use null if unlimited or not specified
-- start_date: Use YYYY-MM-DD format, null if not specified
-- end_date: Use YYYY-MM-DD format, null if open-ended or not specified
-- announcement_type: One of the four types above, or null if unclear
-- is_purchase_limit_announcement: Set to false if this is not a purchase restriction announcement (e.g., regular report, dividend notice, etc.)
-- confidence: Your confidence in this extraction (0.0-1.0). Use lower values for ambiguous cases.
-
-**Few-shot Examples:**
-
-Example 1 (Complete announcement):
-Input: "富国天惠精选成长混合型证券投资基金(LOF)暂停大额申购、转换转入及定期定额投资业务的公告 为保护基金份额持有人的利益，本基金将于2024年1月15日起暂停大额申购，单日单账户累计申购金额不得超过100元，恢复时间另行通知。预计恢复时间为2024年3月1日。"
-Output:
-[
-    {{"ticker": "161005", "limit_amount": 100.0, "start_date": "2024-01-15", "end_date": "2024-03-01", "announcement_type": "complete", "is_purchase_limit_announcement": true, "confidence": 0.95}}
-]
-
-Example 2 (Open-start announcement):
-Input: "关于限制旗下基金大额申购业务的公告 即日起，本基金单日单账户申购限额调整为1000元，上述限制将维持至2024年6月30日。"
-Output:
-[
-    {{"ticker": null, "limit_amount": 1000.0, "start_date": null, "end_date": "2024-06-30", "announcement_type": "open-start", "is_purchase_limit_announcement": true, "confidence": 0.90}}
-]
-
-Example 3 (End-only announcement):
-Input: "关于恢复旗下基金大额申购业务的公告 本基金将于2024年2月1日起恢复大额申购业务，取消此前100元的单日申购限额。"
-Output:
-[
-    {{"ticker": null, "limit_amount": null, "start_date": null, "end_date": "2024-02-01", "announcement_type": "end-only", "is_purchase_limit_announcement": true, "confidence": 0.92}}
-]
-
-Example 4 (Multiple non-consecutive dates):
-Input: "南方中证500ETF联接基金(LOF)(160119)自2024年4月18日、4月21日、7月1日起暂停大额申购，单日限额100元。"
-Output:
-[
-    {{"ticker": "160119", "limit_amount": 100.0, "start_date": "2024-04-18", "end_date": "2024-04-18", "announcement_type": "complete", "is_purchase_limit_announcement": true, "confidence": 0.90}},
-    {{"ticker": "160119", "limit_amount": 100.0, "start_date": "2024-04-21", "end_date": "2024-04-21", "announcement_type": "complete", "is_purchase_limit_announcement": true, "confidence": 0.90}},
-    {{"ticker": "160119", "limit_amount": 100.0, "start_date": "2024-07-01", "end_date": "2024-07-01", "announcement_type": "complete", "is_purchase_limit_announcement": true, "confidence": 0.90}}
-]
-
-Example 5 (Multi-ticker — extract only the specified ticker):
-Input (ticker=160127): "南方消费活力灵活配置混合型证券投资基金(160127)及南方中证互联网指数分级证券投资基金(160142)暂停大额申购，限额1000元，自2024年3月1日起。"
-Output:
-[
-    {{"ticker": "160127", "limit_amount": 1000.0, "start_date": "2024-03-01", "end_date": null, "announcement_type": "complete", "is_purchase_limit_announcement": true, "confidence": 0.92}}
-]
-
-**Important Notes:**
-- If the text is NOT a purchase limit announcement (e.g., quarterly report, dividend announcement, manager change), set `is_purchase_limit_announcement: false`
-- Use null for any field that is not clearly specified in the text
-- Chinese dates may be in various formats (e.g., "2024年1月15日", "2024-01-15"), normalize to YYYY-MM-DD
-- Amounts may be specified in different units (元, 万元), convert to numeric CNY
-
-Return ONLY the JSON array, no additional explanation."""
+SYSTEM_PROMPT_TEMPLATE = _load_prompt("system_prompt.md")
 
 
 class LLMError(Exception):
@@ -256,9 +198,8 @@ class LLMClient:
         """
         if ticker:
             ticker_instruction = (
-                f"You are parsing an announcement that belongs to ticker `{ticker}`. "
-                "Only extract purchase limit information for THIS ticker. "
-                "If the announcement mentions other tickers, ignore them completely."
+                f"\n当前解析的公告属于基金代码 `{ticker}`。"
+                "仅提取该基金的限购信息，忽略公告中提到的其他基金。"
             )
         else:
             ticker_instruction = ""
@@ -266,7 +207,7 @@ class LLMClient:
 
     def _build_prompt(self, text: str, ticker: Optional[str] = None) -> str:
         """
-        Build the full prompt with instructions and few-shot examples.
+        Build the full prompt with instructions.
 
         This is kept for backward compatibility and testing. The actual prompt
         sent to the model is split into system + user messages in parse_announcement().
@@ -276,18 +217,18 @@ class LLMClient:
             ticker: Optional fund ticker code for filtering
 
         Returns:
-            A formatted prompt string with instructions and few-shot examples
+            A formatted prompt string with instructions
         """
         system_prompt = self._build_system_prompt(ticker)
         return f"""{system_prompt}
 
-Now analyze the following announcement text:
+请分析以下公告原文：
 
 ---
 {text}
 ---
 
-Return ONLY the JSON array, no additional explanation."""
+仅返回 JSON 数组，不要输出任何其他内容。"""
 
     @staticmethod
     def _strip_thinking_tokens(text: str) -> str:
@@ -524,7 +465,6 @@ Return ONLY the JSON array, no additional explanation."""
             response = self._openai_client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=0.1,  # Low temp for structured extraction
             )
             return response.choices[0].message.content
         else:
