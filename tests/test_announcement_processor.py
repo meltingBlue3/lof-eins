@@ -607,6 +607,121 @@ class TestAnnouncementProcessor(unittest.TestCase):
         self.assertIn("Cannot connect to Ollama", parse_result[0]["error"])
 
 
+class TestCleanExtractedText(unittest.TestCase):
+    """Unit tests for AnnouncementProcessor._clean_extracted_text static method."""
+
+    def test_clean_html_tags(self):
+        """HTML and XML tags are removed while text content is preserved."""
+        text = '<p>本基金将于2024年限购</p><br/><div>每日限额</div><a href="http://fund.com">点击</a>'
+        result = AnnouncementProcessor._clean_extracted_text(text)
+        # All tags removed
+        self.assertNotIn('<p>', result)
+        self.assertNotIn('</p>', result)
+        self.assertNotIn('<br/>', result)
+        self.assertNotIn('<div>', result)
+        self.assertNotIn('</div>', result)
+        self.assertNotIn('<a', result)
+        self.assertNotIn('</a>', result)
+        # Text content preserved
+        self.assertIn('本基金将于2024年限购', result)
+        self.assertIn('每日限额', result)
+        self.assertIn('点击', result)
+
+    def test_clean_urls(self):
+        """HTTP, HTTPS, and bare www. URLs are removed."""
+        text = '请访问 https://www.example.com/path?q=1 或 http://fund.com 及 www.bare-url.com 获取信息'
+        result = AnnouncementProcessor._clean_extracted_text(text)
+        self.assertNotIn('https://', result)
+        self.assertNotIn('http://', result)
+        self.assertNotIn('www.example.com', result)
+        self.assertNotIn('www.bare-url.com', result)
+        # Surrounding words preserved
+        self.assertIn('请访问', result)
+        self.assertIn('获取信息', result)
+
+    def test_clean_email_addresses(self):
+        """Email addresses are removed from text."""
+        text = '联系方式：contact@fund.com 或 service@example.org 咨询'
+        result = AnnouncementProcessor._clean_extracted_text(text)
+        self.assertNotIn('contact@fund.com', result)
+        self.assertNotIn('service@example.org', result)
+        self.assertIn('联系方式', result)
+        self.assertIn('咨询', result)
+
+    def test_clean_excessive_whitespace(self):
+        """3+ consecutive newlines are collapsed to 2, multiple spaces to single space."""
+        text = '第一段\n\n\n\n\n第二段\n\n第三段  有  多余  空格'
+        result = AnnouncementProcessor._clean_extracted_text(text)
+        # 5 newlines collapsed to 2
+        self.assertNotIn('\n\n\n', result)
+        self.assertIn('\n\n', result)
+        # Multiple spaces collapsed
+        self.assertNotIn('  ', result)
+        # Content preserved
+        self.assertIn('第一段', result)
+        self.assertIn('第二段', result)
+        self.assertIn('第三段', result)
+        self.assertIn('有', result)
+        self.assertIn('多余', result)
+        self.assertIn('空格', result)
+
+    def test_preserve_page_markers(self):
+        """Page markers (--- Page N ---) are fully preserved through cleaning."""
+        text = '--- Page 1 ---\n本基金公告内容\n--- Page 2 ---\n继续内容'
+        result = AnnouncementProcessor._clean_extracted_text(text)
+        self.assertIn('--- Page 1 ---', result)
+        self.assertIn('--- Page 2 ---', result)
+        self.assertIn('本基金公告内容', result)
+        self.assertIn('继续内容', result)
+
+    def test_clean_real_world_sample(self):
+        """Realistic Chinese announcement snippet with mixed HTML, URLs, and content."""
+        text = (
+            '<p>关于161005基金限购的公告</p>\n'
+            '发布日期：2024年1月15日\n'
+            'https://www.csindex.com.cn/announcement/2024/01/fund.pdf\n\n\n'
+            '<div>根据市场情况，本基金自2024年1月15日起</div>\n'
+            '每日限购金额为<b>100万元</b>\n'
+            '请联系 investor@fund.com 咨询\n\n\n\n'
+            'www.fundinfo.com.cn 查询详情'
+        )
+        result = AnnouncementProcessor._clean_extracted_text(text)
+        # HTML removed
+        self.assertNotIn('<p>', result)
+        self.assertNotIn('<div>', result)
+        self.assertNotIn('<b>', result)
+        # URLs removed
+        self.assertNotIn('https://', result)
+        self.assertNotIn('www.csindex', result)
+        self.assertNotIn('www.fundinfo', result)
+        # Email removed
+        self.assertNotIn('investor@fund.com', result)
+        # Excessive newlines collapsed
+        self.assertNotIn('\n\n\n', result)
+        # Meaningful content preserved
+        self.assertIn('161005', result)
+        self.assertIn('2024年1月15日', result)
+        self.assertIn('100万元', result)
+        self.assertIn('每日限购金额为', result)
+
+    def test_clean_empty_and_whitespace(self):
+        """Empty string returns empty string; whitespace-only returns empty string."""
+        self.assertEqual(AnnouncementProcessor._clean_extracted_text(''), '')
+        self.assertEqual(AnnouncementProcessor._clean_extracted_text('   '), '')
+        self.assertEqual(AnnouncementProcessor._clean_extracted_text('\n\n\n'), '')
+        self.assertEqual(AnnouncementProcessor._clean_extracted_text('   \n  \n  '), '')
+
+    def test_clean_already_clean_text(self):
+        """Clean Chinese text passes through unchanged (idempotent for clean input)."""
+        text = '本基金将于2024年1月15日起实施限购\n每日限购金额为100万元\n请投资者注意'
+        result = AnnouncementProcessor._clean_extracted_text(text)
+        self.assertEqual(result, text)
+
+        # Running twice gives same result (idempotent)
+        result2 = AnnouncementProcessor._clean_extracted_text(result)
+        self.assertEqual(result, result2)
+
+
 class TestConvenienceFunctions(unittest.TestCase):
     """Test suite for convenience functions."""
 
