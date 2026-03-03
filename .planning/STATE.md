@@ -71,6 +71,8 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | max_amount REAL NOT NULL (not DEFAULT) | Every insert provides explicit value, DEFAULT was misleading | 2026-02-07 |
 | None for open-ended limit end_date | Represents genuinely open-ended limit, not last-date hack | 2026-02-07 |
 | Remove migration scripts (no real data) | Fresh table creation is the only path, no data to migrate | 2026-02-07 |
+| ASCII char classes for email regex in _clean_extracted_text | \\S+ consumed adjacent Chinese chars; ASCII [A-Za-z0-9...] limits match to standard email local-parts | 2026-03-03 |
+| _clean_extracted_text as static method on AnnouncementProcessor | No instance state needed; callable directly for testing and reuse | 2026-03-03 |
 
 ---
 
@@ -92,14 +94,15 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | 002 | LLM multi-date single-ticker parsing | 2026-02-07 | 24371f5 | [002-llm-multi-date-single-ticker-parsing](./quick/002-llm-multi-date-single-ticker-parsing/) |
 | 003 | README rewrite (full project docs) | 2026-02-08 | e49fa40 | [003-readme-md](./quick/003-readme-md/) |
 | 004 | LLM client dual-provider (cloud + Ollama) | 2026-02-09 | 9d70d35 | [004-refactor-llm-client-dual-provider-support](./quick/004-refactor-llm-client-dual-provider-support/) |
+| 005 | Preprocess PDF text before LLM (HTML/URL/email cleaning) | 2026-03-03 | 6b958e9 | [5-preprocess-exchange-announcements-before](./quick/5-preprocess-exchange-announcements-before/) |
 
 ---
 
 ## Session Continuity
 
-**Last session:** 2026-02-09  
-**Stopped at:** Completed quick-004: Refactor LLM Client Dual-Provider Support  
-**Resume file:** `.planning/quick/004-refactor-llm-client-dual-provider-support/004-SUMMARY.md`
+**Last session:** 2026-03-03
+**Stopped at:** Completed quick-005: Preprocess PDF text before LLM (HTML/URL/email/whitespace cleaning)
+**Resume file:** `.planning/quick/5-preprocess-exchange-announcements-before/5-SUMMARY.md`
 
 **Next action:** Begin Phase 3: Timeline Integration
 - Plan 03-01: Timeline integration algorithm (merge overlapping intervals)
@@ -136,8 +139,8 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | test_loader.py | 4 checks | ✅ Pass |
 | test_pdf_extractor.py | 9 | ✅ Pass |
 | test_llm_client.py | 35 (29+6 cloud) | ✅ Pass |
-| test_announcement_processor.py | 13 | ✅ Pass |
-| **Total** | **116+** | **✅ All Pass** |
+| test_announcement_processor.py | 21 | ✅ Pass |
+| **Total** | **124+** | **✅ All Pass** |
 
 ---
 
