@@ -5,7 +5,7 @@
 **Phase:** 2 of 4 (PDF Processing)  
 **Plan:** 3 of 3 COMPLETE  
 **Status:** Phase 2 Complete - All PDF processing infrastructure ready  
-**Last activity:** 2026-03-03 - Completed quick-005: Preprocess exchange announcements before LLM
+**Last activity:** 2026-03-03 - Completed quick-006: Streamlit frontend UX improvements
 
 ---
 
@@ -95,14 +95,15 @@ See: `.planning/PROJECT.md` (updated 2026-02-06)
 | 003 | README rewrite (full project docs) | 2026-02-08 | e49fa40 | [003-readme-md](./quick/003-readme-md/) |
 | 004 | LLM client dual-provider (cloud + Ollama) | 2026-02-09 | 9d70d35 | [004-refactor-llm-client-dual-provider-support](./quick/004-refactor-llm-client-dual-provider-support/) |
 | 005 | Preprocess PDF text before LLM (HTML/URL/email cleaning) | 2026-03-03 | 6b958e9 | [5-preprocess-exchange-announcements-before](./quick/5-preprocess-exchange-announcements-before/) |
+| 006 | Streamlit frontend UX improvements | 2026-03-03 | d441ead | [6-streamlit](./quick/6-streamlit/) |
 
 ---
 
 ## Session Continuity
 
 **Last session:** 2026-03-03
-**Stopped at:** Completed quick-005: Preprocess PDF text before LLM (HTML/URL/email/whitespace cleaning)
-**Resume file:** `.planning/quick/5-preprocess-exchange-announcements-before/5-SUMMARY.md`
+**Stopped at:** Completed quick-006: Streamlit frontend UX improvements
+**Resume file:** `.planning/quick/6-streamlit/6-SUMMARY.md`
 
 **Next action:** Begin Phase 3: Timeline Integration
 - Plan 03-01: Timeline integration algorithm (merge overlapping intervals)
