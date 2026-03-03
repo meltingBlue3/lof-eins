@@ -23,6 +23,7 @@ Usage:
 
 import json
 import logging
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -125,9 +126,12 @@ class AnnouncementProcessor:
             return result
 
         result["extracted"] = True
-        extracted_text = extraction_result["text"]
+        original_len = len(extraction_result["text"])
+
+        # Step 1.5: Clean extracted text to reduce noise before LLM parsing
+        extracted_text = self._clean_extracted_text(extraction_result["text"])
         self.logger.debug(
-            f"Extracted {len(extracted_text)} characters from {pdf_path.name}"
+            f"Extracted {original_len} chars, cleaned to {len(extracted_text)} chars from {pdf_path.name}"
         )
 
         # Step 2: Parse with LLM (returns List[Dict])
@@ -285,6 +289,54 @@ class AnnouncementProcessor:
         )
 
         return stats
+
+    @staticmethod
+    def _clean_extracted_text(text: str) -> str:
+        """
+        Clean and normalize PDF-extracted text before sending to LLM.
+
+        Removes HTML tags, URLs, email addresses, and normalizes whitespace
+        to reduce token consumption and improve LLM parsing quality.
+        Page markers (--- Page N ---) are preserved through all cleaning steps.
+
+        Args:
+            text: Raw text extracted from PDF
+
+        Returns:
+            Cleaned text with noise removed and whitespace normalized
+
+        Example:
+            >>> raw = '<p>本基金</p>\nhttps://example.com\n\n\n限购100万元'
+            >>> cleaned = AnnouncementProcessor._clean_extracted_text(raw)
+            >>> '<p>' not in cleaned and 'https://' not in cleaned
+            True
+            >>> '本基金' in cleaned and '限购100万元' in cleaned
+            True
+        """
+        # Step 1: Strip HTML tags
+        text = re.sub(r'<[^>]+>', '', text)
+
+        # Step 2: Remove https/http URLs
+        text = re.sub(r'https?://\S+', '', text)
+        # Remove bare www. URLs
+        text = re.sub(r'www\.\S+', '', text)
+
+        # Step 3: Remove email addresses
+        text = re.sub(r'\S+@\S+\.\S+', '', text)
+
+        # Step 4: Collapse excessive whitespace
+        # Replace runs of 3+ newlines with 2 newlines
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        # Replace runs of 2+ spaces (not newlines) with a single space
+        text = re.sub(r'[^\S\n]{2,}', ' ', text)
+
+        # Step 5: Strip leading/trailing whitespace from each line
+        text = '\n'.join(line.strip() for line in text.split('\n'))
+
+        # Step 6: Final strip
+        text = text.strip()
+
+        return text
 
     def _save_parse_result(
         self,
