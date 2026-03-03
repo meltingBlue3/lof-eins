@@ -5,7 +5,7 @@
 **Phase:** 2 of 4 (PDF Processing)  
 **Plan:** 3 of 3 COMPLETE  
 **Status:** Phase 2 Complete - All PDF processing infrastructure ready  
-**Last activity:** 2026-02-09 - Completed quick-004: Refactor LLM Client Dual-Provider Support
+**Last activity:** 2026-03-03 - Completed quick-005: Preprocess exchange announcements before LLM
 
 ---
 
