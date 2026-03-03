@@ -39,6 +39,20 @@ def load_bundle_cached(
 
 
 # ---------------------------------------------------------------------------
+# Unified chart theme
+# ---------------------------------------------------------------------------
+
+def _apply_chart_theme(fig: go.Figure) -> go.Figure:
+    """Apply consistent theme to all charts for Chinese character support."""
+    fig.update_layout(
+        font_family="Microsoft YaHei, SimHei, sans-serif",
+        margin=dict(l=60, r=30, t=50, b=40),
+        hovermode="x unified",
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
 # Chart builders
 # ---------------------------------------------------------------------------
 
@@ -53,7 +67,7 @@ def nav_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
         yaxis_title="净值",
         height=400,
     )
-    return fig
+    return _apply_chart_theme(fig)
 
 
 def ohlcv_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
@@ -76,16 +90,28 @@ def ohlcv_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
         xaxis_rangeslider_visible=False,
         height=500,
     )
-    return fig
+    return _apply_chart_theme(fig)
 
 
 def premium_chart(
     df: pd.DataFrame, ticker: str, buy_threshold: float = 0.02,
 ) -> go.Figure:
     fig = go.Figure()
+
+    # Zero reference line
+    fig.add_hline(y=0, line_color="grey", line_width=1, opacity=0.5)
+
+    # Premium line with fill to zero
     fig.add_trace(go.Scatter(
-        x=df.index, y=df["premium_rate"], mode="lines", name="溢价率",
+        x=df.index,
+        y=df["premium_rate"],
+        mode="lines",
+        name="溢价率",
+        fill="tozeroy",
+        fillcolor="rgba(0,176,80,0.15)",
+        line=dict(color="rgba(0,176,80,0.8)"),
     ))
+
     fig.add_hline(
         y=buy_threshold, line_dash="dash", line_color="red",
         annotation_text=f"买入阈值 {buy_threshold:.2%}",
@@ -97,7 +123,7 @@ def premium_chart(
         yaxis_tickformat=".2%",
         height=400,
     )
-    return fig
+    return _apply_chart_theme(fig)
 
 
 def equity_curve_chart(daily_perf: pd.DataFrame) -> go.Figure:
@@ -108,6 +134,7 @@ def equity_curve_chart(daily_perf: pd.DataFrame) -> go.Figure:
         mode="lines",
         name="总资产",
         line=dict(color="#1f77b4"),
+        hovertemplate="%{x}<br>%{y:,.0f} CNY<extra></extra>",
     ))
 
     # Drawdown shading
@@ -126,7 +153,7 @@ def equity_curve_chart(daily_perf: pd.DataFrame) -> go.Figure:
     fig.update_layout(
         title="权益曲线 & 回撤",
         xaxis_title="日期",
-        yaxis=dict(title="总资产 (¥)"),
+        yaxis=dict(title="总资产 (CNY)"),
         yaxis2=dict(
             title="回撤",
             overlaying="y",
@@ -135,7 +162,7 @@ def equity_curve_chart(daily_perf: pd.DataFrame) -> go.Figure:
         ),
         height=500,
     )
-    return fig
+    return _apply_chart_theme(fig)
 
 
 def trade_markers_chart(
@@ -172,14 +199,14 @@ def trade_markers_chart(
         xaxis_rangeslider_visible=False,
         height=500,
     )
-    return fig
+    return _apply_chart_theme(fig)
 
 
 def pnl_by_ticker_chart(trade_logs: pd.DataFrame) -> go.Figure:
     if trade_logs.empty:
         fig = go.Figure()
         fig.update_layout(title="无交易记录")
-        return fig
+        return _apply_chart_theme(fig)
 
     pnl = trade_logs.groupby("ticker")["net_amount"].sum().sort_values()
     colors = ["green" if v >= 0 else "red" for v in pnl.values]
@@ -190,7 +217,7 @@ def pnl_by_ticker_chart(trade_logs: pd.DataFrame) -> go.Figure:
     fig.update_layout(
         title="各标的盈亏汇总",
         xaxis_title="标的",
-        yaxis_title="净金额 (¥)",
+        yaxis_title="净金额 (CNY)",
         height=400,
     )
-    return fig
+    return _apply_chart_theme(fig)
