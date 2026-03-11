@@ -2,6 +2,8 @@
 """
 Download LOF fund announcement PDFs from Eastmoney.
 
+从东方财富下载LOF基金公告PDF。
+
 Usage:
     python scripts/download_announcements.py
     python scripts/download_announcements.py --ticker 163417
@@ -14,7 +16,7 @@ import argparse
 import sys
 from pathlib import Path
 
-# Add project root to path for imports
+# Add project root to path for imports  # 将项目根目录添加到路径以支持导入
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -22,6 +24,10 @@ from src.data.announcement_downloader import AnnouncementDownloader
 
 
 def main() -> None:
+    """Main entry point for the announcement downloader CLI.
+
+    公告下载器CLI的主入口。
+    """
     parser = argparse.ArgumentParser(
         description="Download LOF fund announcements from Eastmoney",
         formatter_class=argparse.RawDescriptionHelpFormatter,

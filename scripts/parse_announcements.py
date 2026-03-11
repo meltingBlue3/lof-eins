@@ -2,8 +2,12 @@
 """
 CLI tool for parsing LOF fund announcement PDFs and extracting limit information.
 
+用于解析LOF基金公告PDF并提取限购信息的CLI工具。
+
 This script provides a command-line interface for batch processing fund
 announcement PDFs using the AnnouncementProcessor orchestration layer.
+
+此脚本提供命令行界面，使用AnnouncementProcessor协调层批量处理基金公告PDF。
 
 Usage:
     # Process single ticker
@@ -20,22 +24,27 @@ Usage:
 
 Directory Structure:
     The script expects the following directory structure:
+    / 脚本需要以下目录结构：
 
     data_dir/
         config/
-            fund_status.db      # SQLite database for storing parse results
+            fund_status.db      # SQLite database for storing parse results / SQLite数据库（存储解析结果）
         announcements/
-            {ticker}/           # Ticker subdirectory
-                YYYY-MM-DD_{title}.pdf   # PDF announcement files
+            {ticker}/           # Ticker subdirectory / 基金代码子目录
+                YYYY-MM-DD_{title}.pdf   # PDF announcement files / PDF公告文件
 
-Environment Variables:
-    OLLAMA_URL: Base URL for Ollama API (default: http://localhost:11434)
-    OLLAMA_MODEL: Model name to use (default: qwen2.5:7b)
+Environment Variables (loaded from project-root .env if present):
+    LLM_API_KEY, LLM_URL, LLM_MODEL: Cloud API mode (OpenAI-compatible).
+    OLLAMA_HOST, OLLAMA_MODEL: Local Ollama (default: http://localhost:11434, qwen3:8b).
+
+环境变量（从项目根目录.env加载）：
+    LLM_API_KEY, LLM_URL, LLM_MODEL: 云API模式（OpenAI兼容）
+    OLLAMA_HOST, OLLAMA_MODEL: 本地Ollama（默认: http://localhost:11434, qwen3:8b）
 
 Exit Codes:
-    0: Success
-    1: Configuration error (missing database, invalid paths)
-    2: Processing error (all PDFs failed for ticker)
+    0: Success / 成功
+    1: Configuration error (missing database, invalid paths) / 配置错误
+    2: Processing error (all PDFs failed for ticker) / 处理错误
 """
 
 import argparse
@@ -43,24 +52,38 @@ import logging
 import sys
 from pathlib import Path
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add parent directory to path for imports  # 将父目录添加到路径以支持导入
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# Load .env so LLMClient (and other code) can read LLM_* / OLLAMA_* from it
+# 加载.env以便LLMClient（和其他代码）可以读取LLM_*/OLLAMA_*环境变量
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(PROJECT_ROOT / ".env")
+except ImportError:
+    pass
 
 from src.data.announcement_processor import AnnouncementProcessor
 
 
 def _discover_tickers(announcements_dir: Path) -> list:
-    """
-    Discover all tickers with PDF announcements.
+    """Discover all tickers with PDF announcements.
+
+    发现所有包含PDF公告的基金代码。
 
     Scans the announcements directory and returns a sorted list of
     ticker codes (subdirectory names) that contain PDF files.
 
+    扫描公告目录，返回包含PDF文件的基金代码（子目录名）排序列表。
+
     Args:
         announcements_dir: Base directory containing ticker subdirectories
+                           包含基金代码子目录的基础目录
 
     Returns:
-        Sorted list of ticker codes as strings
+        Sorted list of ticker codes as strings / 基金代码字符串排序列表
     """
     if not announcements_dir.exists():
         return []
@@ -68,7 +91,7 @@ def _discover_tickers(announcements_dir: Path) -> list:
     tickers = []
     for item in announcements_dir.iterdir():
         if item.is_dir():
-            # Check if directory contains PDF files
+            # Check if directory contains PDF files / 检查目录是否包含PDF文件
             pdfs = list(item.glob("*.pdf"))
             if pdfs:
                 tickers.append(item.name)
@@ -77,12 +100,13 @@ def _discover_tickers(announcements_dir: Path) -> list:
 
 
 def _print_result(result: dict, verbose: bool = False) -> None:
-    """
-    Pretty print processing statistics.
+    """Pretty print processing statistics.
+
+    格式化打印处理统计信息。
 
     Args:
-        result: Statistics dictionary from process_ticker()
-        verbose: If True, print detailed error information
+        result: Statistics dictionary from process_ticker() / process_ticker()返回的统计字典
+        verbose: If True, print detailed error information / 如为True，打印详细错误信息
     """
     ticker = result.get("ticker", "Unknown")
     total = result.get("total", 0)
@@ -112,17 +136,19 @@ def _print_result(result: dict, verbose: bool = False) -> None:
     elif errors and not verbose:
         print(f"\n    Run with --verbose to see {len(errors)} error(s)")
 
-    # Success rate
+    # Success rate / 成功率
     if total > 0:
         success_rate = (stored / total) * 100
         print(f"\n    Success rate: {success_rate:.1f}%")
 
 
 def main():
-    """
-    Main entry point for the CLI tool.
+    """Main entry point for the CLI tool.
+
+    CLI工具的主入口。
 
     Parses command-line arguments and orchestrates PDF processing.
+    解析命令行参数并协调PDF处理。
     """
     parser = argparse.ArgumentParser(
         description="Parse LOF fund announcement PDFs and extract limit information",
@@ -176,16 +202,16 @@ Notes:
 
     args = parser.parse_args()
 
-    # Setup logging
+    # Setup logging / 设置日志
     level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
 
-    # Resolve paths
+    # Resolve paths / 解析路径
     data_dir = Path(args.data_dir)
     db_path = args.db_path or data_dir / "config" / "fund_status.db"
     announcements_dir = data_dir / "announcements"
 
-    # Validate paths
+    # Validate paths / 验证路径
     if not db_path.exists():
         print(f"Error: Database not found: {db_path}", file=sys.stderr)
         print(
@@ -204,14 +230,14 @@ Notes:
         )
         sys.exit(1)
 
-    # Initialize processor
+    # Initialize processor / 初始化处理器
     try:
         processor = AnnouncementProcessor(db_path, announcements_dir)
     except Exception as e:
         print(f"Error: Failed to initialize processor: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Process based on args
+    # Process based on args / 根据参数处理
     exit_code = 0
 
     if args.ticker:
@@ -219,11 +245,11 @@ Notes:
         result = processor.process_ticker(args.ticker)
         _print_result(result, verbose=args.verbose)
 
-        # Set exit code based on success
+        # Set exit code based on success / 根据成功情况设置退出码
         if result["failed"] == result["total"] and result["total"] > 0:
             exit_code = 2
         elif result["failed"] > 0:
-            exit_code = 0  # Partial success is still success
+            exit_code = 0  # Partial success is still success  # 部分成功仍算成功
 
     elif args.all:
         tickers = _discover_tickers(announcements_dir)

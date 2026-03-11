@@ -5,6 +5,10 @@ Real Data Downloader for ALL LOFs.
 Downloads data from JoinQuant, chunks requests to avoid timeouts,
 and structures it for the DataLoader.
 
+从JoinQuant下载所有LOF基金的真实数据。
+
+从JoinQuant下载数据，分块请求以避免超时，并构建DataLoader所需的数据结构。
+
 Usage:
     python scripts/download_lof.py                           # Use defaults
     python scripts/download_lof.py --start 2024-01-01        # Custom start date
@@ -14,6 +18,11 @@ Configuration:
     Create a .env file in project root with:
         JQ_USERNAME=your_username
         JQ_PASSWORD=your_password
+
+配置：
+    在项目根目录创建.env文件：
+        JQ_USERNAME=用户名
+        JQ_PASSWORD=密码
 """
 
 import argparse
@@ -21,23 +30,25 @@ import os
 import sys
 from pathlib import Path
 
-# Add project root to path for imports
+# Add project root to path for imports  # 将项目根目录添加到路径以支持导入
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# Load environment variables from .env
+# Load environment variables from .env  # 从.env加载环境变量
 try:
     from dotenv import load_dotenv
 
     load_dotenv(PROJECT_ROOT / ".env")
 except ImportError:
-    print("[WARN] python-dotenv not installed, using system environment variables only")
+    print(
+        "[WARN] python-dotenv not installed, using system environment variables only"
+    )  # [警告] python-dotenv未安装，仅使用系统环境变量
 
 from src.data.downloader import RealDataDownloader
 
 
 # ---------------------------------------------------------
-# 默认配置
+# 默认配置 / Default Configuration
 # ---------------------------------------------------------
 DEFAULT_START_DATE = "2024-10-27"
 DEFAULT_END_DATE = "2024-12-26"
@@ -46,6 +57,10 @@ DEFAULT_BATCH_SIZE = 50
 
 
 def main():
+    """Main entry point for the LOF data downloader CLI.
+
+    LOF数据下载器CLI的主入口。
+    """
     parser = argparse.ArgumentParser(
         description="Download LOF data from JoinQuant",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -88,7 +103,7 @@ Environment Variables (or .env file):
 
     args = parser.parse_args()
 
-    # 从环境变量获取账号密码
+    # 从环境变量获取账号密码 / Get credentials from environment variables
     username = os.environ.get("JQ_USERNAME")
     password = os.environ.get("JQ_PASSWORD")
 
