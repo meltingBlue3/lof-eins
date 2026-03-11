@@ -1,8 +1,12 @@
 """
 Comprehensive unit tests for NULL end_date handling in DataLoader.
 
+DataLoader 中 NULL end_date 处理的综合单元测试。
+
 Tests verify that open-ended limits (NULL end_date) are correctly applied to all
 dates >= start_date, and that the is_open_ended computed column works as expected.
+测试验证开放式限购（NULL end_date）正确应用于所有 >= start_date 的日期，
+以及 is_open_ended 计算列按预期工作。
 """
 
 import sys
@@ -15,21 +19,25 @@ from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 
-# Add project root to path
+# Add project root to path  # 将项目根目录添加到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data.loader import DataLoader
 
 
 class TestOpenEndedLimits(unittest.TestCase):
-    """Test suite for open-ended limit (NULL end_date) handling."""
+    """Test suite for open-ended limit (NULL end_date) handling.
+    开放式限购（NULL end_date）处理的测试套件。
+    """
 
     def setUp(self):
-        """Set up temporary test data directory with mock data."""
+        """Set up temporary test data directory with mock data.
+        使用模拟数据设置临时测试数据目录。
+        """
         self.temp_dir = tempfile.mkdtemp(prefix="lof_test_")
         self.data_dir = Path(self.temp_dir) / "data"
 
-        # Create required directory structure
+        # Create required directory structure  # 创建必需的目录结构
         (self.data_dir / "market").mkdir(parents=True)
         (self.data_dir / "nav").mkdir(parents=True)
         (self.data_dir / "config").mkdir(parents=True)
@@ -44,7 +52,9 @@ class TestOpenEndedLimits(unittest.TestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def _create_market_data(self, ticker: str, dates: pd.DatetimeIndex) -> None:
-        """Create minimal market data for testing."""
+        """Create minimal market data for testing.
+        为测试创建最小的行情数据。
+        """
         n_days = len(dates)
         df = pd.DataFrame(
             {
@@ -60,7 +70,9 @@ class TestOpenEndedLimits(unittest.TestCase):
         df.to_parquet(self.data_dir / "market" / f"{ticker}.parquet", index=False)
 
     def _create_nav_data(self, ticker: str, dates: pd.DatetimeIndex) -> None:
-        """Create minimal NAV data for testing."""
+        """Create minimal NAV data for testing.
+        为测试创建最小的净值数据。
+        """
         n_days = len(dates)
         df = pd.DataFrame(
             {
@@ -72,7 +84,9 @@ class TestOpenEndedLimits(unittest.TestCase):
         df.to_parquet(self.data_dir / "nav" / f"{ticker}.parquet", index=False)
 
     def _create_fee_config(self) -> None:
-        """Create minimal fee configuration."""
+        """Create minimal fee configuration.
+        创建最小的费率配置。
+        """
         df = pd.DataFrame(
             {
                 "ticker": [self.ticker],
@@ -87,12 +101,14 @@ class TestOpenEndedLimits(unittest.TestCase):
         df.to_csv(self.data_dir / "config" / "fees.csv", index=False)
 
     def _create_limit_events_db(self, events: list) -> None:
-        """Create SQLite database with limit events."""
+        """Create SQLite database with limit events.
+        创建带有限购事件的 SQLite 数据库。
+        """
         db_path = self.data_dir / "config" / "fund_status.db"
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
-        # Create limit_events table with all columns including generated column
+        # Create limit_events table with all columns including generated column  # 创建包含所有列（包括计算列）的 limit_events 表
         cursor.execute("""
             CREATE TABLE limit_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -128,13 +144,15 @@ class TestOpenEndedLimits(unittest.TestCase):
         conn.close()
 
     def test_null_end_date_applies_to_all_future_dates(self):
-        """Test that NULL end_date correctly applies limit to all dates >= start_date."""
+        """Test that NULL end_date correctly applies limit to all dates >= start_date.
+        测试 NULL end_date 正确将限购应用于所有 >= start_date 的日期。
+        """
         # Setup
         self._create_market_data(self.ticker, self.date_range)
         self._create_nav_data(self.ticker, self.date_range)
         self._create_fee_config()
 
-        # Create open-ended limit starting from Feb 15
+        # Create open-ended limit starting from Feb 15  # 创建从 2 月 15 日开始的开放式限购
         self._create_limit_events_db(
             [
                 {
@@ -150,14 +168,14 @@ class TestOpenEndedLimits(unittest.TestCase):
         loader = DataLoader(str(self.data_dir))
         df = loader.load_bundle(self.ticker).df
 
-        # Verify: Before Feb 15, no limit (inf)
+        # Verify: Before Feb 15, no limit (inf)  # 验证：2 月 15 日之前无限制（inf）
         before_limit = df.loc["2024-01-01":"2024-02-14"]
         self.assertTrue(
             (before_limit["daily_limit"] == float("inf")).all(),
             "Dates before limit start should have no limit (inf)",
         )
 
-        # Verify: From Feb 15 onwards, limit applies
+        # Verify: From Feb 15 onwards, limit applies  # 验证：从 2 月 15 日起限购生效
         during_limit = df.loc["2024-02-15":"2024-06-30"]
         self.assertTrue(
             (during_limit["daily_limit"] == 500.0).all(),
@@ -165,13 +183,15 @@ class TestOpenEndedLimits(unittest.TestCase):
         )
 
     def test_regular_limit_with_end_date_regression(self):
-        """Test that regular limits with end_date still work (regression test)."""
+        """Test that regular limits with end_date still work (regression test).
+        测试带有 end_date 的常规限购仍然工作（回归测试）。
+        """
         # Setup
         self._create_market_data(self.ticker, self.date_range)
         self._create_nav_data(self.ticker, self.date_range)
         self._create_fee_config()
 
-        # Create closed limit from Feb 15 to Mar 15
+        # Create closed limit from Feb 15 to Mar 15  # 创建从 2 月 15 日到 3 月 15 日的封闭式限购
         self._create_limit_events_db(
             [
                 {
@@ -209,7 +229,9 @@ class TestOpenEndedLimits(unittest.TestCase):
         )
 
     def test_mixed_open_and_closed_limits(self):
-        """Test handling of both open-ended and closed limits for same ticker."""
+        """Test handling of both open-ended and closed limits for same ticker.
+        测试同一标的的开放式和封闭式限购处理。
+        """
         # Setup
         self._create_market_data(self.ticker, self.date_range)
         self._create_nav_data(self.ticker, self.date_range)
@@ -259,13 +281,15 @@ class TestOpenEndedLimits(unittest.TestCase):
         )
 
     def test_open_ended_limit_at_start_of_range(self):
-        """Test open-ended limit that starts at beginning of date range."""
+        """Test open-ended limit that starts at beginning of date range.
+        测试在日期范围开始处开始的开放式限购。
+        """
         # Setup
         self._create_market_data(self.ticker, self.date_range)
         self._create_nav_data(self.ticker, self.date_range)
         self._create_fee_config()
 
-        # Create open-ended limit starting from the first date
+        # Create open-ended limit starting from the first date  # 创建从第一个日期开始的开放式限购
         self._create_limit_events_db(
             [
                 {
@@ -288,13 +312,15 @@ class TestOpenEndedLimits(unittest.TestCase):
         )
 
     def test_no_limits_all_infinity(self):
-        """Test that with no limit events, all dates have infinite limits."""
+        """Test that with no limit events, all dates have infinite limits.
+        测试没有限购事件时，所有日期的限购为无限。
+        """
         # Setup
         self._create_market_data(self.ticker, self.date_range)
         self._create_nav_data(self.ticker, self.date_range)
         self._create_fee_config()
 
-        # Create empty limit events database
+        # Create empty limit events database  # 创建空的限购事件数据库
         self._create_limit_events_db([])
 
         # Load data
@@ -308,7 +334,9 @@ class TestOpenEndedLimits(unittest.TestCase):
         )
 
     def test_overlapping_limits_last_one_wins(self):
-        """Test behavior when limits overlap (last limit in sequence should apply)."""
+        """Test behavior when limits overlap (last limit in sequence should apply).
+        测试限购重叠时的行为（序列中的最后一个限购应生效）。
+        """
         # Setup
         self._create_market_data(self.ticker, self.date_range)
         self._create_nav_data(self.ticker, self.date_range)
@@ -341,7 +369,7 @@ class TestOpenEndedLimits(unittest.TestCase):
         )
 
         # Verify: Mar onwards has second (open-ended) limit
-        # The second limit overwrites the first where they overlap
+        # The second limit overwrites the first where they overlap  # 第二个限购在重叠处覆盖第一个
         mar_onwards = df.loc["2024-03-01":"2024-06-30"]
         self.assertTrue(
             (mar_onwards["daily_limit"] == 250.0).all(),
@@ -349,7 +377,9 @@ class TestOpenEndedLimits(unittest.TestCase):
         )
 
     def test_pd_isna_vs_none_handling(self):
-        """Test that pd.isna() correctly handles both None and NaT."""
+        """Test that pd.isna() correctly handles both None and NaT.
+        测试 pd.isna() 正确处理 None 和 NaT。
+        """
         # Setup
         self._create_market_data(self.ticker, self.date_range)
         self._create_nav_data(self.ticker, self.date_range)
@@ -375,7 +405,7 @@ class TestOpenEndedLimits(unittest.TestCase):
             )
         """)
 
-        # Insert with NULL end_date
+        # Insert with NULL end_date  # 插入 NULL end_date
         cursor.execute(
             """INSERT INTO limit_events (ticker, start_date, end_date, max_amount, reason)
             VALUES (?, ?, ?, ?, ?)""",
@@ -397,13 +427,15 @@ class TestOpenEndedLimits(unittest.TestCase):
         )
 
     def test_is_open_ended_computed_column(self):
-        """Test that the is_open_ended computed column correctly identifies open-ended limits."""
+        """Test that the is_open_ended computed column correctly identifies open-ended limits.
+        测试 is_open_ended 计算列正确识别开放式限购。
+        """
         # Setup
         self._create_market_data(self.ticker, self.date_range)
         self._create_nav_data(self.ticker, self.date_range)
         self._create_fee_config()
 
-        # Create mix of open and closed limits
+        # Create mix of open and closed limits  # 创建开放式和封闭式限购的混合
         db_path = self.data_dir / "config" / "fund_status.db"
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -423,14 +455,14 @@ class TestOpenEndedLimits(unittest.TestCase):
             )
         """)
 
-        # Insert open-ended limit
+        # Insert open-ended limit  # 插入开放式限购
         cursor.execute(
             """INSERT INTO limit_events (ticker, start_date, end_date, max_amount, reason)
             VALUES (?, ?, ?, ?, ?)""",
             (self.ticker, "2024-02-01", None, 100.0, "Open-ended"),
         )
 
-        # Insert closed limit
+        # Insert closed limit  # 插入封闭式限购
         cursor.execute(
             """INSERT INTO limit_events (ticker, start_date, end_date, max_amount, reason)
             VALUES (?, ?, ?, ?, ?)""",
@@ -445,10 +477,10 @@ class TestOpenEndedLimits(unittest.TestCase):
         )
         results = cursor.fetchall()
 
-        # First row: NULL end_date -> is_open_ended should be 1
+        # First row: NULL end_date -> is_open_ended should be 1  # 第一行：NULL end_date -> is_open_ended 应为 1
         self.assertEqual(results[0][2], 1, "NULL end_date should have is_open_ended=1")
 
-        # Second row: non-NULL end_date -> is_open_ended should be 0
+        # Second row: non-NULL end_date -> is_open_ended should be 0  # 第二行：非 NULL end_date -> is_open_ended 应为 0
         self.assertEqual(
             results[1][2], 0, "Non-NULL end_date should have is_open_ended=0"
         )
@@ -456,7 +488,9 @@ class TestOpenEndedLimits(unittest.TestCase):
         conn.close()
 
     def test_date_filtering_with_open_ended_limits(self):
-        """Test that date filtering works correctly with open-ended limits."""
+        """Test that date filtering works correctly with open-ended limits.
+        测试日期筛选在开放式限购下正常工作。
+        """
         # Setup
         self._create_market_data(self.ticker, self.date_range)
         self._create_nav_data(self.ticker, self.date_range)
@@ -490,7 +524,9 @@ class TestOpenEndedLimits(unittest.TestCase):
         self.assertLessEqual(df_filtered.index[-1], pd.Timestamp("2024-04-30"))
 
     def test_multiple_tickers_different_limits(self):
-        """Test that different tickers can have different limit configurations."""
+        """Test that different tickers can have different limit configurations.
+        测试不同标的可以有不同的限购配置。
+        """
         tickers = ["TICKA", "TICKB"]
 
         for ticker in tickers:
@@ -519,14 +555,14 @@ class TestOpenEndedLimits(unittest.TestCase):
             )
         """)
 
-        # TICKA: Open-ended limit
+        # TICKA: Open-ended limit  # TICKA：开放式限购
         cursor.execute(
             """INSERT INTO limit_events (ticker, start_date, end_date, max_amount, reason)
             VALUES (?, ?, ?, ?, ?)""",
             ("TICKA", "2024-02-01", None, 100.0, "Open-ended"),
         )
 
-        # TICKB: Closed limit
+        # TICKB: Closed limit  # TICKB：封闭式限购
         cursor.execute(
             """INSERT INTO limit_events (ticker, start_date, end_date, max_amount, reason)
             VALUES (?, ?, ?, ?, ?)""",
@@ -546,7 +582,7 @@ class TestOpenEndedLimits(unittest.TestCase):
             "TICKA should have open-ended limit",
         )
 
-        # TICKB: Mar-Apr has limit, May onwards is unlimited
+        # TICKB: Mar-Apr has limit, May onwards is unlimited  # TICKB：3-4 月有限购，5 月起无限制
         df_b = loader.load_bundle("TICKB").df
         self.assertTrue(
             (df_b.loc["2024-03-01":"2024-04-30", "daily_limit"] == 200.0).all(),
@@ -559,10 +595,14 @@ class TestOpenEndedLimits(unittest.TestCase):
 
 
 class TestOpenEndedLimitsEdgeCases(unittest.TestCase):
-    """Edge case tests for open-ended limit handling."""
+    """Edge case tests for open-ended limit handling.
+    开放式限购处理的边缘情况测试。
+    """
 
     def setUp(self):
-        """Set up temporary test data directory."""
+        """Set up temporary test data directory.
+        设置临时测试数据目录。
+        """
         self.temp_dir = tempfile.mkdtemp(prefix="lof_test_edge_")
         self.data_dir = Path(self.temp_dir) / "data"
 
@@ -580,10 +620,12 @@ class TestOpenEndedLimitsEdgeCases(unittest.TestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def _create_basic_data(self):
-        """Create basic market and NAV data."""
+        """Create basic market and NAV data.
+        创建基本的行情和净值数据。
+        """
         n_days = len(self.date_range)
 
-        # Market data
+        # Market data  # 行情数据
         df_market = pd.DataFrame(
             {
                 "date": self.date_range,
@@ -599,7 +641,7 @@ class TestOpenEndedLimitsEdgeCases(unittest.TestCase):
             self.data_dir / "market" / f"{self.ticker}.parquet", index=False
         )
 
-        # NAV data
+        # NAV data  # 净值数据
         df_nav = pd.DataFrame(
             {
                 "date": self.date_range,
@@ -609,7 +651,7 @@ class TestOpenEndedLimitsEdgeCases(unittest.TestCase):
         )
         df_nav.to_parquet(self.data_dir / "nav" / f"{self.ticker}.parquet", index=False)
 
-        # Fee config
+        # Fee config  # 费率配置
         df_fee = pd.DataFrame(
             {
                 "ticker": [self.ticker],
@@ -624,7 +666,9 @@ class TestOpenEndedLimitsEdgeCases(unittest.TestCase):
         df_fee.to_csv(self.data_dir / "config" / "fees.csv", index=False)
 
     def test_open_ended_limit_at_exact_start_date(self):
-        """Test limit starting at exact first date of available data."""
+        """Test limit starting at exact first date of available data.
+        测试从可用数据的确切第一个日期开始的限购。
+        """
         self._create_basic_data()
 
         db_path = self.data_dir / "config" / "fund_status.db"
@@ -646,7 +690,7 @@ class TestOpenEndedLimitsEdgeCases(unittest.TestCase):
             )
         """)
 
-        # Start exactly on first date
+        # Start exactly on first date  # 从第一个日期确切开始
         first_date = self.date_range[0].strftime("%Y-%m-%d")
         cursor.execute(
             """INSERT INTO limit_events (ticker, start_date, end_date, max_amount, reason)
@@ -660,18 +704,20 @@ class TestOpenEndedLimitsEdgeCases(unittest.TestCase):
         loader = DataLoader(str(self.data_dir))
         df = loader.load_bundle(self.ticker).df
 
-        # All dates should have limit
+        # All dates should have limit  # 所有日期都应有限购
         self.assertTrue(
             (df["daily_limit"] == 50.0).all(),
             "All dates should have limit when starting at exact first date",
         )
 
     def test_very_short_date_range(self):
-        """Test with very short date range (5 days)."""
+        """Test with very short date range (5 days).
+        测试非常短的日期范围（5 天）。
+        """
         short_range = pd.bdate_range(start="2024-01-01", periods=5, freq="B")
         n_days = len(short_range)
 
-        # Create short data
+        # Create short data  # 创建短期数据
         df_market = pd.DataFrame(
             {
                 "date": short_range,
@@ -709,7 +755,7 @@ class TestOpenEndedLimitsEdgeCases(unittest.TestCase):
         )
         df_fee.to_csv(self.data_dir / "config" / "fees.csv", index=False)
 
-        # Open-ended limit from day 3
+        # Open-ended limit from day 3  # 从第 3 天开始的开放式限购
         db_path = self.data_dir / "config" / "fund_status.db"
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -741,7 +787,7 @@ class TestOpenEndedLimitsEdgeCases(unittest.TestCase):
         loader = DataLoader(str(self.data_dir))
         df = loader.load_bundle(self.ticker).df
 
-        # Verify split
+        # Verify split  # 验证分割
         self.assertEqual(df.loc["2024-01-01", "daily_limit"], float("inf"))
         self.assertEqual(df.loc["2024-01-02", "daily_limit"], float("inf"))
         self.assertEqual(df.loc["2024-01-03", "daily_limit"], 75.0)
@@ -749,20 +795,22 @@ class TestOpenEndedLimitsEdgeCases(unittest.TestCase):
 
 
 def run_tests():
-    """Run all tests and print results."""
-    # Create test suite
+    """Run all tests and print results.
+    运行所有测试并打印结果。
+    """
+    # Create test suite  # 创建测试套件
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
 
-    # Add test classes
+    # Add test classes  # 添加测试类
     suite.addTests(loader.loadTestsFromTestCase(TestOpenEndedLimits))
     suite.addTests(loader.loadTestsFromTestCase(TestOpenEndedLimitsEdgeCases))
 
-    # Run tests
+    # Run tests  # 运行测试
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
 
-    # Return exit code
+    # Return exit code  # 返回退出码
     return 0 if result.wasSuccessful() else 1
 
 

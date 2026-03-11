@@ -1,11 +1,16 @@
 """
 Integration tests for the announcement processor module.
 
+公告处理模块的集成测试。
+
 These tests verify the end-to-end functionality of the AnnouncementProcessor
 class, including PDF processing, database storage, and batch operations.
+这些测试验证 AnnouncementProcessor 类的端到端功能，包括 PDF 处理、数据库存储和批量操作。
 
 Note: These tests use mocking to avoid requiring real PDF files or a running
 Ollama instance. They verify the orchestration logic without external dependencies.
+注意：这些测试使用模拟来避免需要真实的 PDF 文件或运行中的 Ollama 实例。
+它们在没有外部依赖的情况下验证编排逻辑。
 """
 
 import json
@@ -23,18 +28,21 @@ from src.data.announcement_processor import (
 
 
 class TestAnnouncementProcessor(unittest.TestCase):
-    """Test suite for AnnouncementProcessor class."""
+    """Test suite for AnnouncementProcessor class.
+    AnnouncementProcessor 类的测试套件。
+    """
 
     def setUp(self):
         """
         Set up test fixtures before each test.
+        在每个测试前设置测试夹具。
 
         Creates:
-        - Temporary directory for test files
-        - Mock SQLite database with announcement_parses table
-        - Mock announcements directory structure
-        - Mock PDF files (empty files)
-        - Mock LLM client
+        - Temporary directory for test files  # 测试文件的临时目录
+        - Mock SQLite database with announcement_parses table  # 带有 announcement_parses 表的模拟 SQLite 数据库
+        - Mock announcements directory structure  # 模拟公告目录结构
+        - Mock PDF files (empty files)  # 模拟 PDF 文件（空文件）
+        - Mock LLM client  # 模拟 LLM 客户端
         """
         self.temp_dir = tempfile.TemporaryDirectory()
         self.test_dir = Path(self.temp_dir.name)
@@ -64,7 +72,9 @@ class TestAnnouncementProcessor(unittest.TestCase):
         )
 
     def tearDown(self):
-        """Clean up temporary directory after each test."""
+        """Clean up temporary directory after each test.
+        每个测试后清理临时目录。
+        """
         import gc
         import time
 
@@ -87,7 +97,9 @@ class TestAnnouncementProcessor(unittest.TestCase):
                 pass
 
     def _create_mock_database(self):
-        """Create mock database with announcement_parses table."""
+        """Create mock database with announcement_parses table.
+        创建带有 announcement_parses 表的模拟数据库。
+        """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute(
@@ -112,7 +124,9 @@ class TestAnnouncementProcessor(unittest.TestCase):
         conn.close()
 
     def _get_db_entries(self, ticker: str = None) -> list:
-        """Helper to get database entries."""
+        """Helper to get database entries.
+        获取数据库条目的辅助函数。
+        """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         if ticker:
@@ -126,7 +140,7 @@ class TestAnnouncementProcessor(unittest.TestCase):
             )
         entries = cursor.fetchall()
         conn.close()
-        # Force garbage collection to release file lock on Windows
+        # Force garbage collection to release file lock on Windows  # 强制垃圾回收以在 Windows 上释放文件锁
         import gc
 
         gc.collect()
@@ -136,12 +150,13 @@ class TestAnnouncementProcessor(unittest.TestCase):
     def test_process_pdf_success(self, mock_extract):
         """
         Test successful PDF processing with mocked extraction and parsing.
+        测试使用模拟提取和解析的成功 PDF 处理。
 
         Verifies:
-        - PDF extraction is called
-        - LLM parsing is called with extracted text
-        - Database entry is created with correct fields
-        - Result indicates success
+        - PDF extraction is called  # PDF 提取被调用
+        - LLM parsing is called with extracted text  # 使用提取的文本调用 LLM 解析
+        - Database entry is created with correct fields  # 使用正确的字段创建数据库条目
+        - Result indicates success  # 结果表示成功
         """
         # Setup mocks
         mock_extract.return_value = {
@@ -204,12 +219,13 @@ class TestAnnouncementProcessor(unittest.TestCase):
     def test_process_pdf_extraction_failure(self, mock_extract):
         """
         Test handling of PDF extraction failure.
+        测试 PDF 提取失败的处理。
 
         Verifies:
-        - Extraction failure is detected
-        - No database entry is created
-        - Error message is returned
-        - Result indicates failure but no exception raised
+        - Extraction failure is detected  # 提取失败被检测到
+        - No database entry is created  # 不创建数据库条目
+        - Error message is returned  # 返回错误消息
+        - Result indicates failure but no exception raised  # 结果表示失败但不抛出异常
         """
         # Setup mock to simulate extraction failure
         mock_extract.return_value = {
@@ -240,11 +256,12 @@ class TestAnnouncementProcessor(unittest.TestCase):
     def test_process_pdf_not_limit_announcement(self, mock_extract):
         """
         Test handling of non-limit announcements.
+        测试非限购公告的处理。
 
         Verifies:
-        - Non-limit announcements are detected
-        - Still stored in database for audit trail
-        - is_limit_announcement flag is False
+        - Non-limit announcements are detected  # 非限购公告被检测到
+        - Still stored in database for audit trail  # 仍然存储在数据库中以供审计跟踪
+        - is_limit_announcement flag is False  # is_limit_announcement 标志为 False
         """
         # Setup mocks
         mock_extract.return_value = {
@@ -287,11 +304,12 @@ class TestAnnouncementProcessor(unittest.TestCase):
     def test_process_ticker_batch(self, mock_extract):
         """
         Test batch processing of all PDFs for a ticker.
+        测试单个标的的所有 PDF 批量处理。
 
         Verifies:
-        - All PDFs are processed
-        - Statistics are accurate
-        - Individual failures don't stop batch
+        - All PDFs are processed  # 所有 PDF 都被处理
+        - Statistics are accurate  # 统计信息准确
+        - Individual failures don't stop batch  # 单个失败不会停止批量处理
         """
 
         # Setup mock to succeed for first PDF, fail for second, succeed for third
@@ -349,7 +367,9 @@ class TestAnnouncementProcessor(unittest.TestCase):
 
     @patch("src.data.announcement_processor.extract_pdf_text")
     def test_process_pdf_multi_record(self, mock_extract):
-        """Test processing PDF that yields multiple records."""
+        """Test processing PDF that yields multiple records.
+        测试产生多条记录的 PDF 处理。
+        """
         mock_extract.return_value = {
             "success": True,
             "text": "multi date text",
@@ -392,11 +412,12 @@ class TestAnnouncementProcessor(unittest.TestCase):
     def test_date_extraction_from_filename(self):
         """
         Test date parsing from various filename formats.
+        测试从各种文件名格式解析日期。
 
         Verifies:
-        - Standard format: YYYY-MM-DD_title.pdf
-        - Correct date extraction
-        - Error handling for invalid formats
+        - Standard format: YYYY-MM-DD_title.pdf  # 标准格式
+        - Correct date extraction  # 正确的日期提取
+        - Error handling for invalid formats  # 无效格式的错误处理
         """
         # Test valid formats
         test_cases = [
@@ -418,11 +439,12 @@ class TestAnnouncementProcessor(unittest.TestCase):
     def test_database_insertion_format(self, mock_extract):
         """
         Test that parse results are stored as valid JSON with correct format.
+        测试解析结果以有效的 JSON 格式存储。
 
         Verifies:
-        - parse_result is valid JSON
-        - All required fields are present
-        - parse_type and confidence are extracted correctly
+        - parse_result is valid JSON  # parse_result 是有效的 JSON
+        - All required fields are present  # 所有必需字段都存在
+        - parse_type and confidence are extracted correctly  # parse_type 和 confidence 正确提取
         """
         # Setup mocks
         mock_extract.return_value = {
@@ -476,11 +498,12 @@ class TestAnnouncementProcessor(unittest.TestCase):
     def test_error_handling_continues_processing(self, mock_extract):
         """
         Test that individual PDF failures don't stop batch processing.
+        测试单个 PDF 失败不会停止批量处理。
 
         Verifies:
-        - Exception during processing is caught
-        - Batch continues with remaining PDFs
-        - Error is logged and included in stats
+        - Exception during processing is caught  # 处理期间的异常被捕获
+        - Batch continues with remaining PDFs  # 批量处理继续处理剩余的 PDF
+        - Error is logged and included in stats  # 错误被记录并包含在统计中
         """
 
         # Setup mock to raise exception for one PDF
@@ -518,10 +541,11 @@ class TestAnnouncementProcessor(unittest.TestCase):
     def test_ticker_has_parses(self):
         """
         Test _ticker_has_parses method.
+        测试 _ticker_has_parses 方法。
 
         Verifies:
-        - Returns False when ticker has no entries
-        - Returns True after processing PDFs
+        - Returns False when ticker has no entries  # 当标的没有条目时返回 False
+        - Returns True after processing PDFs  # 处理 PDF 后返回 True
         """
         # Initially should have no parses
         self.assertFalse(self.processor._ticker_has_parses("161005"))
@@ -546,10 +570,11 @@ class TestAnnouncementProcessor(unittest.TestCase):
     def test_process_ticker_no_directory(self):
         """
         Test processing ticker with non-existent directory.
+        测试处理不存在目录的标的。
 
         Verifies:
-        - Graceful handling of missing directory
-        - Appropriate error in result
+        - Graceful handling of missing directory  # 优雅处理缺失的目录
+        - Appropriate error in result  # 结果中有适当的错误
         """
         result = self.processor.process_ticker("999999")
 
@@ -562,10 +587,11 @@ class TestAnnouncementProcessor(unittest.TestCase):
     def test_parse_result_with_error_field(self, mock_extract):
         """
         Test handling of LLM parse results that contain an error field.
+        测试包含错误字段的 LLM 解析结果的处理。
 
         Verifies:
-        - Results with error fields are still stored
-        - Error information is preserved in database
+        - Results with error fields are still stored  # 包含错误字段的结果仍然被存储
+        - Error information is preserved in database  # 错误信息保留在数据库中
         """
         # Setup mocks
         mock_extract.return_value = {
@@ -608,112 +634,130 @@ class TestAnnouncementProcessor(unittest.TestCase):
 
 
 class TestCleanExtractedText(unittest.TestCase):
-    """Unit tests for AnnouncementProcessor._clean_extracted_text static method."""
+    """Unit tests for AnnouncementProcessor._clean_extracted_text static method.
+    AnnouncementProcessor._clean_extracted_text 静态方法的单元测试。
+    """
 
     def test_clean_html_tags(self):
-        """HTML and XML tags are removed while text content is preserved."""
+        """HTML and XML tags are removed while text content is preserved.
+        HTML 和 XML 标签被移除，同时保留文本内容。
+        """
         text = '<p>本基金将于2024年限购</p><br/><div>每日限额</div><a href="http://fund.com">点击</a>'
         result = AnnouncementProcessor._clean_extracted_text(text)
         # All tags removed
-        self.assertNotIn('<p>', result)
-        self.assertNotIn('</p>', result)
-        self.assertNotIn('<br/>', result)
-        self.assertNotIn('<div>', result)
-        self.assertNotIn('</div>', result)
-        self.assertNotIn('<a', result)
-        self.assertNotIn('</a>', result)
+        self.assertNotIn("<p>", result)
+        self.assertNotIn("</p>", result)
+        self.assertNotIn("<br/>", result)
+        self.assertNotIn("<div>", result)
+        self.assertNotIn("</div>", result)
+        self.assertNotIn("<a", result)
+        self.assertNotIn("</a>", result)
         # Text content preserved
-        self.assertIn('本基金将于2024年限购', result)
-        self.assertIn('每日限额', result)
-        self.assertIn('点击', result)
+        self.assertIn("本基金将于2024年限购", result)
+        self.assertIn("每日限额", result)
+        self.assertIn("点击", result)
 
     def test_clean_urls(self):
-        """HTTP, HTTPS, and bare www. URLs are removed."""
-        text = '请访问 https://www.example.com/path?q=1 或 http://fund.com 及 www.bare-url.com 获取信息'
+        """HTTP, HTTPS, and bare www. URLs are removed.
+        HTTP、HTTPS 和裸 www. URL 被移除。
+        """
+        text = "请访问 https://www.example.com/path?q=1 或 http://fund.com 及 www.bare-url.com 获取信息"
         result = AnnouncementProcessor._clean_extracted_text(text)
-        self.assertNotIn('https://', result)
-        self.assertNotIn('http://', result)
-        self.assertNotIn('www.example.com', result)
-        self.assertNotIn('www.bare-url.com', result)
+        self.assertNotIn("https://", result)
+        self.assertNotIn("http://", result)
+        self.assertNotIn("www.example.com", result)
+        self.assertNotIn("www.bare-url.com", result)
         # Surrounding words preserved
-        self.assertIn('请访问', result)
-        self.assertIn('获取信息', result)
+        self.assertIn("请访问", result)
+        self.assertIn("获取信息", result)
 
     def test_clean_email_addresses(self):
-        """Email addresses are removed from text."""
-        text = '联系方式：contact@fund.com 或 service@example.org 咨询'
+        """Email addresses are removed from text.
+        电子邮件地址从文本中被移除。
+        """
+        text = "联系方式：contact@fund.com 或 service@example.org 咨询"
         result = AnnouncementProcessor._clean_extracted_text(text)
-        self.assertNotIn('contact@fund.com', result)
-        self.assertNotIn('service@example.org', result)
-        self.assertIn('联系方式', result)
-        self.assertIn('咨询', result)
+        self.assertNotIn("contact@fund.com", result)
+        self.assertNotIn("service@example.org", result)
+        self.assertIn("联系方式", result)
+        self.assertIn("咨询", result)
 
     def test_clean_excessive_whitespace(self):
-        """3+ consecutive newlines are collapsed to 2, multiple spaces to single space."""
-        text = '第一段\n\n\n\n\n第二段\n\n第三段  有  多余  空格'
+        """3+ consecutive newlines are collapsed to 2, multiple spaces to single space.
+        3 个或更多连续换行符折叠为 2 个，多个空格折叠为单个空格。
+        """
+        text = "第一段\n\n\n\n\n第二段\n\n第三段  有  多余  空格"
         result = AnnouncementProcessor._clean_extracted_text(text)
         # 5 newlines collapsed to 2
-        self.assertNotIn('\n\n\n', result)
-        self.assertIn('\n\n', result)
+        self.assertNotIn("\n\n\n", result)
+        self.assertIn("\n\n", result)
         # Multiple spaces collapsed
-        self.assertNotIn('  ', result)
+        self.assertNotIn("  ", result)
         # Content preserved
-        self.assertIn('第一段', result)
-        self.assertIn('第二段', result)
-        self.assertIn('第三段', result)
-        self.assertIn('有', result)
-        self.assertIn('多余', result)
-        self.assertIn('空格', result)
+        self.assertIn("第一段", result)
+        self.assertIn("第二段", result)
+        self.assertIn("第三段", result)
+        self.assertIn("有", result)
+        self.assertIn("多余", result)
+        self.assertIn("空格", result)
 
     def test_preserve_page_markers(self):
-        """Page markers (--- Page N ---) are fully preserved through cleaning."""
-        text = '--- Page 1 ---\n本基金公告内容\n--- Page 2 ---\n继续内容'
+        """Page markers (--- Page N ---) are fully preserved through cleaning.
+        页面标记（--- Page N ---）在清理过程中完全保留。
+        """
+        text = "--- Page 1 ---\n本基金公告内容\n--- Page 2 ---\n继续内容"
         result = AnnouncementProcessor._clean_extracted_text(text)
-        self.assertIn('--- Page 1 ---', result)
-        self.assertIn('--- Page 2 ---', result)
-        self.assertIn('本基金公告内容', result)
-        self.assertIn('继续内容', result)
+        self.assertIn("--- Page 1 ---", result)
+        self.assertIn("--- Page 2 ---", result)
+        self.assertIn("本基金公告内容", result)
+        self.assertIn("继续内容", result)
 
     def test_clean_real_world_sample(self):
-        """Realistic Chinese announcement snippet with mixed HTML, URLs, and content."""
+        """Realistic Chinese announcement snippet with mixed HTML, URLs, and content.
+        真实的中文公告片段，包含混合的 HTML、URL 和内容。
+        """
         text = (
-            '<p>关于161005基金限购的公告</p>\n'
-            '发布日期：2024年1月15日\n'
-            'https://www.csindex.com.cn/announcement/2024/01/fund.pdf\n\n\n'
-            '<div>根据市场情况，本基金自2024年1月15日起</div>\n'
-            '每日限购金额为<b>100万元</b>\n'
-            '请联系 investor@fund.com 咨询\n\n\n\n'
-            'www.fundinfo.com.cn 查询详情'
+            "<p>关于161005基金限购的公告</p>\n"
+            "发布日期：2024年1月15日\n"
+            "https://www.csindex.com.cn/announcement/2024/01/fund.pdf\n\n\n"
+            "<div>根据市场情况，本基金自2024年1月15日起</div>\n"
+            "每日限购金额为<b>100万元</b>\n"
+            "请联系 investor@fund.com 咨询\n\n\n\n"
+            "www.fundinfo.com.cn 查询详情"
         )
         result = AnnouncementProcessor._clean_extracted_text(text)
         # HTML removed
-        self.assertNotIn('<p>', result)
-        self.assertNotIn('<div>', result)
-        self.assertNotIn('<b>', result)
+        self.assertNotIn("<p>", result)
+        self.assertNotIn("<div>", result)
+        self.assertNotIn("<b>", result)
         # URLs removed
-        self.assertNotIn('https://', result)
-        self.assertNotIn('www.csindex', result)
-        self.assertNotIn('www.fundinfo', result)
+        self.assertNotIn("https://", result)
+        self.assertNotIn("www.csindex", result)
+        self.assertNotIn("www.fundinfo", result)
         # Email removed
-        self.assertNotIn('investor@fund.com', result)
+        self.assertNotIn("investor@fund.com", result)
         # Excessive newlines collapsed
-        self.assertNotIn('\n\n\n', result)
+        self.assertNotIn("\n\n\n", result)
         # Meaningful content preserved
-        self.assertIn('161005', result)
-        self.assertIn('2024年1月15日', result)
-        self.assertIn('100万元', result)
-        self.assertIn('每日限购金额为', result)
+        self.assertIn("161005", result)
+        self.assertIn("2024年1月15日", result)
+        self.assertIn("100万元", result)
+        self.assertIn("每日限购金额为", result)
 
     def test_clean_empty_and_whitespace(self):
-        """Empty string returns empty string; whitespace-only returns empty string."""
-        self.assertEqual(AnnouncementProcessor._clean_extracted_text(''), '')
-        self.assertEqual(AnnouncementProcessor._clean_extracted_text('   '), '')
-        self.assertEqual(AnnouncementProcessor._clean_extracted_text('\n\n\n'), '')
-        self.assertEqual(AnnouncementProcessor._clean_extracted_text('   \n  \n  '), '')
+        """Empty string returns empty string; whitespace-only returns empty string.
+        空字符串返回空字符串；仅包含空白字符的返回空字符串。
+        """
+        self.assertEqual(AnnouncementProcessor._clean_extracted_text(""), "")
+        self.assertEqual(AnnouncementProcessor._clean_extracted_text("   "), "")
+        self.assertEqual(AnnouncementProcessor._clean_extracted_text("\n\n\n"), "")
+        self.assertEqual(AnnouncementProcessor._clean_extracted_text("   \n  \n  "), "")
 
     def test_clean_already_clean_text(self):
-        """Clean Chinese text passes through unchanged (idempotent for clean input)."""
-        text = '本基金将于2024年1月15日起实施限购\n每日限购金额为100万元\n请投资者注意'
+        """Clean Chinese text passes through unchanged (idempotent for clean input).
+        干净的中文文本通过时保持不变（对干净输入是幂等的）。
+        """
+        text = "本基金将于2024年1月15日起实施限购\n每日限购金额为100万元\n请投资者注意"
         result = AnnouncementProcessor._clean_extracted_text(text)
         self.assertEqual(result, text)
 
@@ -723,10 +767,14 @@ class TestCleanExtractedText(unittest.TestCase):
 
 
 class TestConvenienceFunctions(unittest.TestCase):
-    """Test suite for convenience functions."""
+    """Test suite for convenience functions.
+    便捷函数的测试套件。
+    """
 
     def setUp(self):
-        """Set up test fixtures."""
+        """Set up test fixtures.
+        设置测试夹具。
+        """
         self.temp_dir = tempfile.TemporaryDirectory()
         self.test_dir = Path(self.temp_dir.name)
 
@@ -759,7 +807,9 @@ class TestConvenienceFunctions(unittest.TestCase):
         (self.ticker_dir / "2024-01-15_公告.pdf").touch()
 
     def tearDown(self):
-        """Clean up temporary directory."""
+        """Clean up temporary directory.
+        清理临时目录。
+        """
         import gc
         import time
 
@@ -785,11 +835,12 @@ class TestConvenienceFunctions(unittest.TestCase):
     def test_process_pdf_convenience(self, mock_processor_class):
         """
         Test process_pdf convenience function.
+        测试 process_pdf 便捷函数。
 
         Verifies:
-        - Function creates AnnouncementProcessor instance
-        - Calls process_pdf method
-        - Returns result
+        - Function creates AnnouncementProcessor instance  # 函数创建 AnnouncementProcessor 实例
+        - Calls process_pdf method  # 调用 process_pdf 方法
+        - Returns result  # 返回结果
         """
         # Setup mock
         mock_processor = MagicMock()
@@ -813,11 +864,12 @@ class TestConvenienceFunctions(unittest.TestCase):
     def test_process_ticker_convenience(self, mock_processor_class):
         """
         Test process_ticker convenience function.
+        测试 process_ticker 便捷函数。
 
         Verifies:
-        - Function creates AnnouncementProcessor instance
-        - Calls process_ticker method
-        - Returns statistics
+        - Function creates AnnouncementProcessor instance  # 函数创建 AnnouncementProcessor 实例
+        - Calls process_ticker method  # 调用 process_ticker 方法
+        - Returns statistics  # 返回统计信息
         """
         # Setup mock
         mock_processor = MagicMock()

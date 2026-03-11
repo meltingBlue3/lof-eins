@@ -1,13 +1,16 @@
 """
 Database schema validation tests for LOF Fund Arbitrage Backtesting System.
 
+LOF 基金套利回测系统的数据库模式验证测试。
+
 Tests verify that tables (limit_events, announcement_parses)
 have correct schema including:
-- Proper columns with correct types
-- Nullable vs non-nullable fields
-- Generated columns (is_open_ended)
-- Indexes exist
-- Default values
+测试验证表（limit_events、announcement_parses）具有正确的模式，包括：
+- Proper columns with correct types  # 正确类型的列
+- Nullable vs non-nullable fields  # 可空与非可空字段
+- Generated columns (is_open_ended)  # 计算列（is_open_ended）
+- Indexes exist  # 索引存在
+- Default values  # 默认值
 """
 
 import sys
@@ -18,33 +21,41 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime
 
-# Add project root to path
+# Add project root to path  # 将项目根目录添加到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 class TestDatabaseSchema(unittest.TestCase):
-    """Test suite for database schema validation."""
+    """Test suite for database schema validation.
+    数据库模式验证的测试套件。
+    """
 
     def setUp(self):
-        """Set up temporary SQLite database."""
+        """Set up temporary SQLite database.
+        设置临时 SQLite 数据库。
+        """
         self.temp_dir = tempfile.mkdtemp(prefix="lof_schema_test_")
         self.db_path = Path(self.temp_dir) / "test_fund_status.db"
         self.conn = sqlite3.connect(self.db_path)
         self.cursor = self.conn.cursor()
 
-        # Create schema matching generators.py
+        # Create schema matching generators.py  # 创建与 generators.py 匹配的模式
         self._create_full_schema()
 
     def tearDown(self):
-        """Clean up temporary database."""
+        """Clean up temporary database.
+        清理临时数据库。
+        """
         self.conn.close()
         import shutil
 
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def _create_full_schema(self):
-        """Create the full database schema as defined in generators.py."""
-        # limit_events table
+        """Create the full database schema as defined in generators.py.
+        创建 generators.py 中定义的完整数据库模式。
+        """
+        # limit_events table  # limit_events 表
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS limit_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,13 +71,13 @@ class TestDatabaseSchema(unittest.TestCase):
             )
         """)
 
-        # Indexes for limit_events
+        # Indexes for limit_events  # limit_events 的索引
         self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_limit_events_is_open_ended
             ON limit_events(is_open_ended)
         """)
 
-        # announcement_parses table
+        # announcement_parses table  # announcement_parses 表
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS announcement_parses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,7 +92,7 @@ class TestDatabaseSchema(unittest.TestCase):
             )
         """)
 
-        # Indexes for announcement_parses
+        # Indexes for announcement_parses  # announcement_parses 的索引
         self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_announcement_parses_ticker
             ON announcement_parses(ticker)
@@ -94,12 +105,16 @@ class TestDatabaseSchema(unittest.TestCase):
         self.conn.commit()
 
     def _get_table_info(self, table_name: str) -> list:
-        """Get PRAGMA table_info results for a table."""
+        """Get PRAGMA table_info results for a table.
+        获取表的 PRAGMA table_info 结果。
+        """
         self.cursor.execute(f"PRAGMA table_info({table_name})")
         return self.cursor.fetchall()
 
     def _get_indexes(self, table_name: str) -> list:
-        """Get indexes for a table."""
+        """Get indexes for a table.
+        获取表的索引。
+        """
         self.cursor.execute(
             "SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name=?",
             (table_name,),
@@ -107,14 +122,16 @@ class TestDatabaseSchema(unittest.TestCase):
         return self.cursor.fetchall()
 
     def _column_exists(self, table_name: str, column_name: str) -> bool:
-        """Check if column exists (including generated columns)."""
-        # Check regular columns via PRAGMA
+        """Check if column exists (including generated columns).
+        检查列是否存在（包括计算列）。
+        """
+        # Check regular columns via PRAGMA  # 通过 PRAGMA 检查常规列
         self.cursor.execute(f"PRAGMA table_info({table_name})")
         columns = [row[1] for row in self.cursor.fetchall()]
         if column_name in columns:
             return True
 
-        # Check generated columns by trying to query
+        # Check generated columns by trying to query  # 通过尝试查询检查计算列
         try:
             self.cursor.execute(f"SELECT {column_name} FROM {table_name} LIMIT 0")
             return True
@@ -122,11 +139,13 @@ class TestDatabaseSchema(unittest.TestCase):
             return False
 
     # =========================================================================
-    # limit_events Schema Tests
+    # limit_events Schema Tests  # limit_events 模式测试
     # =========================================================================
 
     def test_limit_events_table_exists(self):
-        """Test that limit_events table exists."""
+        """Test that limit_events table exists.
+        测试 limit_events 表存在。
+        """
         self.cursor.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='limit_events'"
         )
@@ -135,7 +154,9 @@ class TestDatabaseSchema(unittest.TestCase):
         self.assertEqual(result[0], "limit_events")
 
     def test_limit_events_required_columns(self):
-        """Test that limit_events has all required columns."""
+        """Test that limit_events has all required columns.
+        测试 limit_events 具有所有必需的列。
+        """
         required_columns = [
             "id",
             "ticker",
@@ -154,7 +175,9 @@ class TestDatabaseSchema(unittest.TestCase):
             )
 
     def test_limit_events_id_column_properties(self):
-        """Test id column: INTEGER PRIMARY KEY AUTOINCREMENT."""
+        """Test id column: INTEGER PRIMARY KEY AUTOINCREMENT.
+        测试 id 列：INTEGER PRIMARY KEY AUTOINCREMENT。
+        """
         info = self._get_table_info("limit_events")
         id_col = [row for row in info if row[1] == "id"][0]
 
@@ -164,7 +187,9 @@ class TestDatabaseSchema(unittest.TestCase):
         self.assertEqual(id_col[5], 1, "id should be primary key")
 
     def test_limit_events_ticker_not_null(self):
-        """Test ticker column: TEXT NOT NULL."""
+        """Test ticker column: TEXT NOT NULL.
+        测试 ticker 列：TEXT NOT NULL。
+        """
         info = self._get_table_info("limit_events")
         ticker_col = [row for row in info if row[1] == "ticker"][0]
 
@@ -172,7 +197,9 @@ class TestDatabaseSchema(unittest.TestCase):
         self.assertEqual(ticker_col[3], 1, "ticker should be NOT NULL")
 
     def test_limit_events_start_date_not_null(self):
-        """Test start_date column: DATE NOT NULL."""
+        """Test start_date column: DATE NOT NULL.
+        测试 start_date 列：DATE NOT NULL。
+        """
         info = self._get_table_info("limit_events")
         start_col = [row for row in info if row[1] == "start_date"][0]
 
@@ -180,7 +207,9 @@ class TestDatabaseSchema(unittest.TestCase):
         self.assertEqual(start_col[3], 1, "start_date should be NOT NULL")
 
     def test_limit_events_end_date_nullable(self):
-        """Test end_date column: DATE (nullable for open-ended limits)."""
+        """Test end_date column: DATE (nullable for open-ended limits).
+        测试 end_date 列：DATE（开放式限购时可空）。
+        """
         info = self._get_table_info("limit_events")
         end_col = [row for row in info if row[1] == "end_date"][0]
 
@@ -188,13 +217,15 @@ class TestDatabaseSchema(unittest.TestCase):
         self.assertEqual(end_col[3], 0, "end_date should be nullable")
 
     def test_limit_events_max_amount_not_null(self):
-        """Test max_amount column: REAL NOT NULL."""
+        """Test max_amount column: REAL NOT NULL.
+        测试 max_amount 列：REAL NOT NULL。
+        """
         info = self._get_table_info("limit_events")
         max_col = [row for row in info if row[1] == "max_amount"][0]
 
         self.assertEqual(max_col[2], "REAL", "max_amount should be REAL")
         self.assertEqual(max_col[3], 1, "max_amount should be NOT NULL")
-        # Check NOT NULL in CREATE TABLE statement
+        # Check NOT NULL in CREATE TABLE statement  # 检查 CREATE TABLE 语句中的 NOT NULL
         self.cursor.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='limit_events'"
         )
@@ -360,11 +391,13 @@ class TestDatabaseSchema(unittest.TestCase):
             )
 
     # =========================================================================
-    # announcement_parses Schema Tests
+    # announcement_parses Schema Tests  # announcement_parses 模式测试
     # =========================================================================
 
     def test_announcement_parses_table_exists(self):
-        """Test that announcement_parses table exists."""
+        """Test that announcement_parses table exists.
+        测试 announcement_parses 表存在。
+        """
         self.cursor.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='announcement_parses'"
         )
@@ -372,7 +405,9 @@ class TestDatabaseSchema(unittest.TestCase):
         self.assertIsNotNone(result, "announcement_parses table should exist")
 
     def test_announcement_parses_required_columns(self):
-        """Test that announcement_parses has all required columns."""
+        """Test that announcement_parses has all required columns.
+        测试 announcement_parses 具有所有必需的列。
+        """
         required_columns = [
             "id",
             "ticker",
@@ -555,11 +590,13 @@ class TestDatabaseSchema(unittest.TestCase):
         self.assertEqual(result, json_data, "JSON data should be stored correctly")
 
     # =========================================================================
-    # Cross-Table Integrity Tests
+    # Cross-Table Integrity Tests  # 跨表完整性测试
     # =========================================================================
 
     def test_all_tables_exist(self):
-        """Test that all required tables exist."""
+        """Test that all required tables exist.
+        测试所有必需的表存在。
+        """
         self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = [row[0] for row in self.cursor.fetchall()]
 
@@ -568,7 +605,9 @@ class TestDatabaseSchema(unittest.TestCase):
             self.assertIn(table, tables, f"Table '{table}' should exist")
 
     def test_all_indexes_exist(self):
-        """Test that all required indexes exist across all tables."""
+        """Test that all required indexes exist across all tables.
+        测试所有表的所有必需索引存在。
+        """
         self.cursor.execute(
             "SELECT name, tbl_name FROM sqlite_master WHERE type='index'"
         )
@@ -589,10 +628,14 @@ class TestDatabaseSchema(unittest.TestCase):
 
 
 class TestDatabaseSchemaIntegration(unittest.TestCase):
-    """Integration tests using actual database creation patterns."""
+    """Integration tests using actual database creation patterns.
+    使用实际数据库创建模式的集成测试。
+    """
 
     def test_schema_matches_generator_pattern(self):
-        """Verify schema matches the pattern used in FundStatusGenerator."""
+        """Verify schema matches the pattern used in FundStatusGenerator.
+        验证模式与 FundStatusGenerator 中使用的模式匹配。
+        """
         temp_dir = tempfile.mkdtemp()
         db_path = Path(temp_dir) / "fund_status.db"
 
@@ -600,7 +643,7 @@ class TestDatabaseSchemaIntegration(unittest.TestCase):
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
 
-            # Create schema exactly as FundStatusGenerator does
+            # Create schema exactly as FundStatusGenerator does  # 完全按照 FundStatusGenerator 创建模式
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS limit_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -671,14 +714,14 @@ class TestDatabaseSchemaIntegration(unittest.TestCase):
 
             conn.commit()
 
-            # Verify tables exist
+            # Verify tables exist  # 验证表存在
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
             tables = [row[0] for row in cursor.fetchall()]
             self.assertIn("limit_events", tables)
             self.assertIn("announcement_parses", tables)
             self.assertIn("limit_event_log", tables)
 
-            # Test insertion
+            # Test insertion  # 测试插入
             cursor.execute(
                 """INSERT INTO limit_events (ticker, start_date, end_date, max_amount)
                 VALUES (?, ?, ?, ?)""",
@@ -699,7 +742,7 @@ class TestDatabaseSchemaIntegration(unittest.TestCase):
 
             conn.commit()
 
-            # Verify data
+            # Verify data  # 验证数据
             cursor.execute(
                 "SELECT is_open_ended FROM limit_events WHERE ticker=?", ("TEST",)
             )
@@ -714,7 +757,9 @@ class TestDatabaseSchemaIntegration(unittest.TestCase):
 
 
 def run_tests():
-    """Run all tests and print results."""
+    """Run all tests and print results.
+    运行所有测试并打印结果。
+    """
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
 
