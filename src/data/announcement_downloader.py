@@ -1,7 +1,10 @@
 """
 Announcement Downloader for LOF funds.
 
+LOF 基金公告下载器。
+
 Downloads announcement PDFs from Eastmoney within each fund's backtest period.
+从东方财富下载各基金回测期间的公告 PDF。
 """
 
 from __future__ import annotations
@@ -18,12 +21,13 @@ import requests
 
 class AnnouncementDownloader:
     """Downloads LOF fund announcement PDFs within backtest date ranges.
+    在回测日期范围内下载 LOF 基金公告 PDF。
 
     Attributes:
-        data_dir: Root directory for LOF data (market data required).
-        announcement_type: 0=all announcements, 5=periodic reports.
-        page_size: Number of announcements per API page.
-        delay: Delay between requests in seconds.
+        data_dir: Root directory for LOF data (market data required).  # LOF 数据的根目录（需要行情数据）
+        announcement_type: 0=all announcements, 5=periodic reports.  # 0=所有公告，5=定期报告
+        page_size: Number of announcements per API page.  # 每 API 页的公告数量
+        delay: Delay between requests in seconds.  # 请求之间的延迟（秒）
     """
 
     API_URL = "https://api.fund.eastmoney.com/f10/JJGG"
@@ -49,7 +53,9 @@ class AnnouncementDownloader:
 
     @staticmethod
     def clean_filename(text: str, max_length: int = 120) -> str:
-        """Clean filename for Windows compatibility."""
+        """Clean filename for Windows compatibility.
+        清理文件名以兼容 Windows 系统。
+        """
         cleaned = re.sub(r"[\\/:*?\"<>|]", "_", text)
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         if len(cleaned) > max_length:
@@ -57,11 +63,15 @@ class AnnouncementDownloader:
         return cleaned or "announcement"
 
     def list_available_tickers(self) -> List[str]:
-        """Discover available LOF tickers from market data directory."""
+        """Discover available LOF tickers from market data directory.
+        从行情数据目录发现可用的 LOF 标的代码。
+        """
         return sorted([f.stem for f in self.market_dir.glob("*.parquet")])
 
     def get_fund_date_range(self, ticker: str) -> Tuple[str, str]:
-        """Get backtest date range from market data parquet file."""
+        """Get backtest date range from market data parquet file.
+        从行情数据 parquet 文件获取回测日期范围。
+        """
         market_path = self.market_dir / f"{ticker}.parquet"
         if not market_path.exists():
             raise FileNotFoundError(f"Market data not found: {market_path}")
@@ -85,7 +95,9 @@ class AnnouncementDownloader:
         }
 
     def get_announcement_list(self, fund_code: str, page_index: int = 1) -> List[Dict]:
-        """Fetch announcement list from Eastmoney API with pagination."""
+        """Fetch announcement list from Eastmoney API with pagination.
+        从东方财富 API 获取公告列表（支持分页）。
+        """
         params = {
             "fundcode": fund_code,
             "pageIndex": page_index,
@@ -137,7 +149,9 @@ class AnnouncementDownloader:
         start_date: str,
         end_date: str,
     ) -> List[Dict]:
-        """Get ALL announcements for a fund within date range."""
+        """Get ALL announcements for a fund within date range.
+        获取基金在日期范围内的所有公告。
+        """
         start_dt = pd.to_datetime(start_date)
         end_dt = pd.to_datetime(end_date)
 
@@ -166,7 +180,9 @@ class AnnouncementDownloader:
         return all_items
 
     def download_pdf(self, doc_id: str, filepath: str, max_retries: int = 3) -> bool:
-        """Download single PDF with retry logic."""
+        """Download single PDF with retry logic.
+        下载单个 PDF（带重试逻辑）。
+        """
         pdf_url = self.PDF_URL_TEMPLATE.format(doc_id=doc_id)
         target_path = Path(filepath)
         temp_path = target_path.with_suffix(target_path.suffix + ".part")
@@ -211,7 +227,9 @@ class AnnouncementDownloader:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> Dict[str, int]:
-        """Download all announcements for a single fund."""
+        """Download all announcements for a single fund.
+        下载单个基金的所有公告。
+        """
         if start_date is None or end_date is None:
             start_date, end_date = self.get_fund_date_range(ticker)
 
@@ -259,7 +277,9 @@ class AnnouncementDownloader:
     def download_all_lof_announcements(
         self, tickers: Optional[List[str]] = None
     ) -> Dict[str, int]:
-        """Download announcements for all LOFs using their backtest periods."""
+        """Download announcements for all LOFs using their backtest periods.
+        使用回测期间下载所有 LOF 的公告。
+        """
         if tickers is None:
             tickers = self.list_available_tickers()
 

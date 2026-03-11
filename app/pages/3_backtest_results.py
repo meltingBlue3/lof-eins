@@ -14,7 +14,7 @@ from utils import (
 st.header("回测结果分析")
 
 # ---------------------------------------------------------------------------
-# Guard: result must exist in session state
+# Guard: result must exist in session state  # 守卫：会话状态中必须存在结果
 # ---------------------------------------------------------------------------
 if "backtest_result" not in st.session_state:
     st.info("尚无回测结果。请先在 **回测参数调整 + 运行** 页面执行回测。")
@@ -25,7 +25,7 @@ tickers = st.session_state.get("backtest_tickers", [])
 data_dir = st.session_state.get("backtest_data_dir", "./data/mock")
 
 # ---------------------------------------------------------------------------
-# Backtest config used (if available)
+# Backtest config used (if available)  # 使用的回测配置（如可用）
 # ---------------------------------------------------------------------------
 if "backtest_config" in st.session_state:
     config = st.session_state["backtest_config"]
@@ -37,7 +37,7 @@ if "backtest_config" in st.session_state:
         st.table(config_df)
 
 # ---------------------------------------------------------------------------
-# Metrics cards with color-coded deltas
+# Metrics cards with color-coded deltas  # 指标卡片（带颜色编码的增量）
 # ---------------------------------------------------------------------------
 st.subheader("核心指标")
 cols = st.columns(5)
@@ -71,7 +71,7 @@ cols[3].metric(
 cols[4].metric("交易次数", result.num_trades)
 
 # ---------------------------------------------------------------------------
-# Equity curve
+# Equity curve  # 权益曲线
 # ---------------------------------------------------------------------------
 st.subheader("权益曲线")
 if not result.daily_perf.empty:
@@ -80,7 +80,7 @@ else:
     st.warning("无每日绩效数据")
 
 # ---------------------------------------------------------------------------
-# Trade markers on OHLC per ticker
+# Trade markers on OHLC per ticker  # 每个标的的 OHLC 交易标记
 # ---------------------------------------------------------------------------
 st.subheader("交易标记")
 for ticker in tickers:
@@ -97,23 +97,25 @@ for ticker in tickers:
     )
 
 # ---------------------------------------------------------------------------
-# Per-ticker PnL summary
+# Per-ticker PnL summary  # 各标的盈亏汇总
 # ---------------------------------------------------------------------------
 st.subheader("各标的盈亏")
 st.plotly_chart(pnl_by_ticker_chart(result.trade_logs), use_container_width=True)
 
 # ---------------------------------------------------------------------------
-# Trade log table with Chinese column names and CSV export
+# Trade log table with Chinese column names and CSV export  # 交易明细表（中文列名）及 CSV 导出
 # ---------------------------------------------------------------------------
 st.subheader("交易明细")
 if not result.trade_logs.empty:
-    display_logs = result.trade_logs.rename(columns={
-        "ticker": "标的",
-        "action": "操作",
-        "date": "日期",
-        "price": "价格",
-        "net_amount": "净金额",
-    })
+    display_logs = result.trade_logs.rename(
+        columns={
+            "ticker": "标的",
+            "action": "操作",
+            "date": "日期",
+            "price": "价格",
+            "net_amount": "净金额",
+        }
+    )
 
     st.dataframe(
         display_logs,

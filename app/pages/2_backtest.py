@@ -5,9 +5,10 @@ import yaml
 
 from utils import get_data_loader
 
-# Ensure project root is importable (already handled in utils, but be safe)
+# Ensure project root is importable (already handled in utils, but be safe)  # 确保项目根目录可导入（已在 utils 中处理，但为保险起见）
 import sys
 from pathlib import Path
+
 _root = str(Path(__file__).resolve().parent.parent.parent)
 if _root not in sys.path:
     sys.path.insert(0, _root)
@@ -17,7 +18,7 @@ from src import BacktestConfig, BacktestEngine, SimpleLOFStrategy
 st.header("回测参数调整 + 运行")
 
 # ---------------------------------------------------------------------------
-# Runtime controls
+# Runtime controls  # 运行时控件
 # ---------------------------------------------------------------------------
 with st.sidebar:
     data_dir = st.text_input("数据目录", value="./data/mock", key="bt_data_dir")
@@ -38,7 +39,7 @@ with st.sidebar:
     end_date = col2.date_input("结束日期", value=None, key="bt_end")
 
 # ---------------------------------------------------------------------------
-# YAML config loader
+# YAML config loader  # YAML 配置加载器
 # ---------------------------------------------------------------------------
 st.subheader("配置导入")
 
@@ -50,12 +51,20 @@ with cfg_col1:
         try:
             uploaded_data = yaml.safe_load(uploaded_file.read())
             if uploaded_data:
-                for key in ["initial_cash", "buy_threshold", "liquidity_ratio",
-                            "commission_rate", "risk_mode", "use_ma5_liquidity",
-                            "risk_free_rate"]:
+                for key in [
+                    "initial_cash",
+                    "buy_threshold",
+                    "liquidity_ratio",
+                    "commission_rate",
+                    "risk_mode",
+                    "use_ma5_liquidity",
+                    "risk_free_rate",
+                ]:
                     if key in uploaded_data:
                         st.session_state[f"param_{key}"] = uploaded_data[key]
-                st.info(f"已加载上传配置: {', '.join(k for k in uploaded_data if not k.startswith('#'))}")
+                st.info(
+                    f"已加载上传配置: {', '.join(k for k in uploaded_data if not k.startswith('#'))}"
+                )
         except Exception as e:
             st.error(f"YAML 解析失败: {e}")
 
@@ -76,7 +85,7 @@ with cfg_col2:
             st.error(f"加载默认配置失败: {e}")
 
 # ---------------------------------------------------------------------------
-# Parameter form
+# Parameter form  # 参数表单
 # ---------------------------------------------------------------------------
 st.subheader("策略参数")
 
@@ -121,7 +130,11 @@ with col_a:
 with col_b:
     risk_mode_options = ["fixed", "infinite"]
     risk_mode_default = st.session_state.get("param_risk_mode", "fixed")
-    risk_mode_index = risk_mode_options.index(risk_mode_default) if risk_mode_default in risk_mode_options else 0
+    risk_mode_index = (
+        risk_mode_options.index(risk_mode_default)
+        if risk_mode_default in risk_mode_options
+        else 0
+    )
     risk_mode = st.selectbox(
         "风险模式",
         risk_mode_options,
@@ -143,7 +156,7 @@ with col_b:
     )
 
 # ---------------------------------------------------------------------------
-# Run button
+# Run button  # 运行按钮
 # ---------------------------------------------------------------------------
 st.divider()
 

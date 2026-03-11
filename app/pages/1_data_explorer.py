@@ -13,7 +13,7 @@ from utils import (
 st.header("LOF 数据看板")
 
 # ---------------------------------------------------------------------------
-# Sidebar controls
+# Sidebar controls  # 侧边栏控件
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.markdown("**数据源**")
@@ -59,7 +59,7 @@ if not tickers:
     st.stop()
 
 # ---------------------------------------------------------------------------
-# Render charts per ticker
+# Render charts per ticker  # 按标的渲染图表
 # ---------------------------------------------------------------------------
 for ticker in tickers:
     st.subheader(f"标的: {ticker}")
