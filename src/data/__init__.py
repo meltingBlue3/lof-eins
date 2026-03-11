@@ -2,14 +2,19 @@
 Data module for LOF backtesting system.
 
 Includes data loading, mock data generation, and real data download capabilities.
+
+LOF回测系统数据模块。
+
+包括数据加载、模拟数据生成和真实数据下载功能。
 """
 
 from .loader import BundleResult, DataLoader
 from .generator import MockConfig, generate_mock_data
 
-# Conditional import for downloader (requires jqdatasdk)
+# Conditional import for downloader (requires jqdatasdk)  # 条件导入下载器（需要jqdatasdk）
 try:
     from .downloader import RealDataDownloader, download_all_lof
+
     _DOWNLOADER_AVAILABLE = True
 except ImportError:
     _DOWNLOADER_AVAILABLE = False

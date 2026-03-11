@@ -322,7 +322,8 @@ class AnnouncementProcessor:
         text = re.sub(r'www\.\S+', '', text)
 
         # Step 3: Remove email addresses
-        text = re.sub(r'\S+@\S+\.\S+', '', text)
+        # Use ASCII-only word chars so Chinese text adjacent to @ is not consumed
+        text = re.sub(r'[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}', '', text)
 
         # Step 4: Collapse excessive whitespace
         # Replace runs of 3+ newlines with 2 newlines
