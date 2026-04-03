@@ -7,13 +7,10 @@
 tickers:
   - "161005"
   - "162411"
-  - "161725"
-  - "501018"
-  - "160216"
 
 # Date range for data generation (YYYY-MM-DD format)
 start_date: "2024-01-01"
-end_date: "2024-12-31"
+end_date: "2024-02-29"
 
 # Initial Net Asset Value for each fund
 initial_nav: 2.0

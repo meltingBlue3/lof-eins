@@ -169,40 +169,38 @@ class RealDataDownloader:
     def _get_nav_data(
         self, codes: List[str], start_date: str, end_date: str
     ) -> pd.DataFrame:
-        """Fetch NAV data for a batch of codes.
-        获取一批代码的净值数据。
+        """Fetch NAV data for a batch of codes via akshare.
+        通过 akshare 获取一批代码的净值数据。
         """
-        pure_codes = [c.split(".")[0] for c in codes]
-        pure_to_full = {c.split(".")[0]: c for c in codes}
-
         try:
-            q = jq.query(finance.FUND_NET_VALUE).filter(
-                finance.FUND_NET_VALUE.code.in_(pure_codes),
-                finance.FUND_NET_VALUE.day >= start_date,
-                finance.FUND_NET_VALUE.day <= end_date,
-            )
-            nav_df = finance.run_query(q)
-
-            if nav_df.empty:
-                return pd.DataFrame()
-
-            # Normalize NAV column name  # 规范化净值列名
-            if "unit_net_value" in nav_df.columns:
-                nav_df["nav"] = nav_df["unit_net_value"]
-            elif "net_value" in nav_df.columns:
-                nav_df["nav"] = nav_df["net_value"]
-            else:
-                return pd.DataFrame()
-
-            nav_df = nav_df.rename(columns={"day": "date"})
-            nav_df["date"] = pd.to_datetime(nav_df["date"])
-            nav_df["code"] = nav_df["code"].map(pure_to_full)
-            nav_df = nav_df.dropna(subset=["code"])
-
-            return nav_df[["date", "code", "nav"]]
-        except Exception as e:
-            print(f"    [WARN] NAV data batch error: {e}")
+            import akshare as ak
+        except ImportError:
+            print("    [ERROR] akshare is required for NAV download: pip install akshare")
             return pd.DataFrame()
+
+        start_dt = pd.Timestamp(start_date)
+        end_dt = pd.Timestamp(end_date)
+        frames = []
+
+        for code in codes:
+            ticker_pure = code.split(".")[0]
+            try:
+                df = ak.fund_open_fund_info_em(symbol=ticker_pure, indicator="单位净值走势")
+                if df.empty:
+                    continue
+                # Columns: 净值日期, 单位净值, 日增长率
+                df = df.rename(columns={"净值日期": "date", "单位净值": "nav"})
+                df["date"] = pd.to_datetime(df["date"])
+                df = df[(df["date"] >= start_dt) & (df["date"] <= end_dt)]
+                df["nav"] = pd.to_numeric(df["nav"], errors="coerce")
+                df["code"] = code
+                frames.append(df[["date", "code", "nav"]])
+            except Exception as e:
+                print(f"    [WARN] NAV for {ticker_pure}: {e}")
+
+        if not frames:
+            return pd.DataFrame()
+        return pd.concat(frames, ignore_index=True)
 
     def _process_and_save(
         self, codes: List[str], price_df: pd.DataFrame, nav_df: pd.DataFrame
@@ -371,6 +369,41 @@ class RealDataDownloader:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_announcement_parses_processed
             ON announcement_parses(processed)
+        """)
+
+        # Create subscription_restrictions table (rich event stream from Kimi K2.5)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS subscription_restrictions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fund_code TEXT NOT NULL,
+                fund_name TEXT,
+                announcement_date DATE NOT NULL,
+                effective_date DATE NOT NULL,
+                end_date DATE,
+                action TEXT NOT NULL CHECK(action IN (
+                    'restrict', 'suspend', 'resume', 'invalidate', 'adjust_rule'
+                )),
+                restriction_type TEXT CHECK(restriction_type IN (
+                    'amount_limit', 'full_suspension', 'holiday_suspension',
+                    'pre_holiday_suspension', 'application_invalid', 'rule_change'
+                )),
+                scope TEXT CHECK(scope IN ('large_only', 'all', 'partial_channel')),
+                limit_amount REAL,
+                affected_business TEXT DEFAULT '[]',
+                reason TEXT,
+                source_file TEXT NOT NULL,
+                fund_company TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sr_fund_code
+            ON subscription_restrictions(fund_code)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sr_fund_date
+            ON subscription_restrictions(fund_code, effective_date)
         """)
 
         conn.commit()

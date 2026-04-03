@@ -16,7 +16,7 @@ liquidity_ratio: 0.1
 commission_rate: 0.0003
 
 # Position sizing mode: 'fixed' uses available cash, 'infinite' ignores cash constraints
-risk_mode: fixed
+risk_mode: infinite
 
 # Use MA5 volume for liquidity calculation
 use_ma5_liquidity: true
@@ -31,7 +31,8 @@ risk_free_rate: 0.02
 # Data source directory (relative or absolute path)
 # - ./data/mock        : Mock data for testing
 # - ./data/real_all_lof: Real data downloaded from JoinQuant
-data_dir: ./data/real_all_lof
+# data_dir: ./data/real_all_lof
+data_dir: ./data/mock
 
 # Tickers to run backtest on
 # Options:
