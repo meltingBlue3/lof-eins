@@ -251,7 +251,7 @@ class DataLoader:
                 mask = date_index >= start
             else:
                 mask = (date_index >= start) & (date_index <= end)
-            daily_limits.loc[mask] = max_amount
+            daily_limits.loc[mask] = daily_limits.loc[mask].clip(upper=max_amount)
 
         return daily_limits
 

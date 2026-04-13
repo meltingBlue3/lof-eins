@@ -4,7 +4,7 @@
 # Modify values below to test different strategies and parameters.
 
 # Initial capital (CNY)
-initial_cash: 300000.0
+initial_cash: 10000.0
 
 # Minimum premium rate to trigger buy signal (2% = 0.02)
 buy_threshold: 0.017
@@ -16,7 +16,11 @@ liquidity_ratio: 0.1
 commission_rate: 0.0003
 
 # Position sizing mode: 'fixed' uses available cash, 'infinite' ignores cash constraints
-risk_mode: infinite
+risk_mode: fixed
+
+# Maximum premium rate to allow buying (null = no upper limit)
+# Set to 0.03 to skip buys when premium > 3%
+max_premium_rate: null
 
 # Use MA5 volume for liquidity calculation
 use_ma5_liquidity: true
@@ -32,7 +36,7 @@ risk_free_rate: 0.02
 # - ./data/mock        : Mock data for testing
 # - ./data/real_all_lof: Real data downloaded from JoinQuant
 # data_dir: ./data/real_all_lof
-data_dir: ./data/mock
+data_dir: ./data/real_all_lof
 
 # Tickers to run backtest on
 # Options:

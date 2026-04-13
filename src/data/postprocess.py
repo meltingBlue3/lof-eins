@@ -104,6 +104,22 @@ def fix_resume_type(records: List[dict]) -> List[dict]:
     return records
 
 
+def _is_holiday_resume(record: dict) -> bool:
+    """Check if a resume record is holiday-related (should not terminate long-term suspends).
+
+    Holiday resumes only lift the holiday pause; any pre-existing long-term
+    suspension remains in effect, as stated in fund announcements:
+    "本次恢复后仍受相关交易状态限制".
+    """
+    src = record.get("source_file", "")
+    rtype = record.get("restriction_type", "")
+    return (
+        rtype in ("holiday_suspension", "application_invalid")
+        or "节假日" in src
+        or "境外" in src
+    )
+
+
 def build_limit_events(records: List[dict]) -> List[dict]:
     """
     Convert event stream to limit_events intervals for backtesting.
@@ -118,8 +134,40 @@ def build_limit_events(records: List[dict]) -> List[dict]:
         by_fund[r["fund_code"]].append(r)
 
     intervals = []
+    synthetic_count = 0
     for fund, fund_records in by_fund.items():
         fund_records.sort(key=lambda r: r["effective_date"])
+
+        # Detect missing prior suspend: if the first non-holiday event is a
+        # resume, the original suspension predates our data range.  Add a
+        # synthetic suspend from the earliest possible date so the gap is
+        # covered.  (e.g. 161129 was suspended since 2020-03 but our data
+        # starts 2022-01.)
+        first_non_holiday = None
+        for rec in fund_records:
+            if not _is_holiday_resume(rec):
+                first_non_holiday = rec
+                break
+        if first_non_holiday and first_non_holiday["action"] == "resume":
+            resume_date = first_non_holiday["effective_date"]
+            try:
+                end_dt = datetime.strptime(resume_date, "%Y-%m-%d") - timedelta(
+                    days=1
+                )
+                synth_end = end_dt.strftime("%Y-%m-%d")
+            except ValueError:
+                synth_end = resume_date
+            intervals.append(
+                {
+                    "ticker": fund,
+                    "start_date": "2000-01-01",
+                    "end_date": synth_end,
+                    "max_amount": 0.0,
+                    "reason": "synthetic - suspension predates data range",
+                    "source_announcement_ids": "[]",
+                }
+            )
+            synthetic_count += 1
 
         i = 0
         while i < len(fund_records):
@@ -137,11 +185,14 @@ def build_limit_events(records: List[dict]) -> List[dict]:
                     if not end:
                         end = start
                 else:
-                    # Look for matching resume
+                    # Look for matching resume (skip holiday resumes)
                     found_resume = False
                     for j in range(i + 1, len(fund_records)):
                         nxt = fund_records[j]
                         if nxt["action"] == "resume":
+                            # Holiday resumes don't terminate long-term suspends
+                            if _is_holiday_resume(nxt):
+                                continue
                             try:
                                 resume_date = datetime.strptime(
                                     nxt["effective_date"], "%Y-%m-%d"
@@ -197,7 +248,8 @@ def build_limit_events(records: List[dict]) -> List[dict]:
 
     print(
         f"构建 limit_events: {len(by_fund)} 只基金, "
-        f"{len(intervals)} 个限制区间"
+        f"{len(intervals)} 个限制区间 "
+        f"(含 {synthetic_count} 个合成前置暂停)"
     )
     return intervals
 

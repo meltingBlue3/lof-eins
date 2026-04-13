@@ -53,9 +53,14 @@ class ProgressTracker:
             data = json.loads(self.progress_file.read_text(encoding="utf-8"))
             self.processed = data.get("processed", [])
             self.failed = data.get("failed", [])
+            self.results = data.get("results", [])
 
     def save(self):
-        data = {"processed": self.processed, "failed": self.failed}
+        data = {
+            "processed": self.processed,
+            "failed": self.failed,
+            "results": self.results,
+        }
         self.progress_file.write_text(
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
         )
@@ -265,7 +270,13 @@ class AnnouncementProcessor:
             )
         """)
 
+        skipped = 0
         for r in records:
+            # Skip records missing required fields
+            if not r.get("effective_date") or not r.get("fund_code"):
+                skipped += 1
+                continue
+
             affected = r.get("affected_business", [])
             if isinstance(affected, list):
                 affected = json.dumps(affected, ensure_ascii=False)
@@ -297,6 +308,8 @@ class AnnouncementProcessor:
 
         conn.commit()
         conn.close()
+        if skipped:
+            print(f"  [WARN] 跳过 {skipped} 条缺少关键字段的记录")
 
     def _clear_restrictions(self):
         """Clear all records from subscription_restrictions table."""

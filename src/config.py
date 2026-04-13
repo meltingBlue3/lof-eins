@@ -6,7 +6,7 @@ LOF回测引擎的中央配置管理模块。
 
 from dataclasses import dataclass, fields, asdict
 from pathlib import Path
-from typing import Literal, Union
+from typing import Literal, Optional, Union
 
 import yaml
 
@@ -34,6 +34,7 @@ class BacktestConfig:
     risk_mode: Literal["fixed", "infinite"] = "fixed"
     use_ma5_liquidity: bool = True
     risk_free_rate: float = 0.02
+    max_premium_rate: Optional[float] = None
 
     def __post_init__(self) -> None:
         """Validate configuration parameters. / 验证配置参数"""

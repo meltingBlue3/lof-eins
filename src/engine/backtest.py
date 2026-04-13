@@ -425,6 +425,9 @@ class BacktestEngine:
                 daily_limit = row["daily_limit"]
 
                 # Filter: must exceed threshold and have positive limit  # 过滤：必须超过阈值且有正限额
+                # Optional: skip if premium exceeds max_premium_rate  # 可选：溢价率超过上限则跳过
+                if self.config.max_premium_rate is not None and premium_rate > self.config.max_premium_rate:
+                    continue
                 if premium_rate > self.config.buy_threshold and daily_limit > 0:
                     buy_candidates.append(
                         {
@@ -627,8 +630,11 @@ class BacktestEngine:
         else:
             signal_cap = signal.amount
 
+        # Hard cap per trade (CNY)  # 单笔申购硬上限
+        hard_cap = 100_000.0
+
         # Take minimum of all constraints  # 取所有约束的最小值
-        max_amount = min(limit_cap, liquid_cap, cash_cap, signal_cap)
+        max_amount = min(limit_cap, liquid_cap, cash_cap, signal_cap, hard_cap)
 
         if max_amount <= 0 or account.cash <= 0:
             return None
