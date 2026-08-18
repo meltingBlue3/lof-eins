@@ -48,24 +48,25 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DOC-01 | TBD | Pending |
-| DOC-02 | TBD | Pending |
-| LLM-01 | TBD | Pending |
-| LLM-02 | TBD | Pending |
-| LLM-03 | TBD | Pending |
-| STAB-01 | TBD | Pending |
-| STAB-02 | TBD | Pending |
-| STAB-03 | TBD | Pending |
-| REL-01 | TBD | Pending |
-| REL-02 | TBD | Pending |
-| REL-03 | TBD | Pending |
-| HYG-01 | TBD | Pending |
-| HYG-02 | TBD | Pending |
+| DOC-01 | Phase 7 | Pending |
+| DOC-02 | Phase 7 | Pending |
+| LLM-01 | Phase 5 | Pending |
+| LLM-02 | Phase 5 | Pending |
+| LLM-03 | Phase 5 | Pending |
+| STAB-01 | Phase 4 | Pending |
+| STAB-02 | Phase 4 | Pending |
+| STAB-03 | Phase 4 | Pending |
+| REL-01 | Phase 5 | Pending |
+| REL-02 | Phase 6 | Pending |
+| REL-03 | Phase 6 | Pending |
+| HYG-01 | Phase 7 | Pending |
+| HYG-02 | Phase 7 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 13 total
-- Mapped to phases: 0 (roadmap pending)
-- Unmapped: 13
+- Mapped to phases: 13 (Phase 4: STAB-01/02/03; Phase 5: LLM-01/02/03, REL-01; Phase 6: REL-02/03; Phase 7: DOC-01/02, HYG-01/02)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-08-18*
+*Roadmap mapping completed: 2026-08-18*

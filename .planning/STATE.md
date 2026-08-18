@@ -1,240 +1,87 @@
 ---
-gsd_state_version: 1.0
+gsd_state_version: '1.0'
 milestone: v1.1
 milestone_name: Stabilization & Refactor
 status: planning
-last_updated: "2026-08-18T09:30:16.509Z"
+last_updated: "2026-08-18T00:00:00.000Z"
 last_activity: 2026-08-18
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
   percent: 0
 ---
 
-# Project State: LOF Purchase Limit Enhancement
-
-## Current Position
-
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-08-18 — Milestone v1.1 started
-
-## Progress
-
-```
-Phase 1: Foundation        [██████████] 100% (4/4 plans) ✅
-Phase 2: PDF Processing    [██████████] 100% (3/3 plans) ✅
-Phase 3: Timeline Integration [░░░░░░░░░░] 0%
-Phase 4: Integration       [░░░░░░░░░░] 0%
-
-Overall: ████████ 44% (7/16 estimated plans)
-```
-
----
+# Project State: LOF Fund Arbitrage Backtesting System
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-02-06)
+See: `.planning/PROJECT.md` (updated 2026-08-18)
 
-**Core value:** Accurate purchase limit data enables reliable arbitrage strategy backtesting
+**Core value:** Accurate purchase limit data enables reliable arbitrage strategy backtesting — v1.1 protects that value by closing the test/safety gaps that let a real 7x PnL-inflation bug ship undetected.
 
-**Current focus:** Phase 2 - PDF Processing (in progress, 1/3 plans complete)
+**Current focus:** Phase 4 — Postprocess Pipeline Hardening (roadmap just created, ready to plan)
 
----
+## Current Position
 
-## Accumulated Decisions
+Phase: 4 of 7 (Postprocess Pipeline Hardening) — first phase of milestone v1.1
+Plan: — (not yet planned)
+Status: Roadmap created, ready to plan
+Last activity: 2026-08-18 — ROADMAP.md and REQUIREMENTS.md traceability written for v1.1
 
-| Decision | Rationale | Date |
-|----------|-----------|------|
-| Use NULL for open-ended limits | Industry standard, semantically clear | 2026-02-06 |
-| Event sourcing pattern | Immutable audit trail, enables reprocessing | 2026-02-06 |
-| Local LLM (Ollama) vs Cloud API | Cost control, data privacy, offline capability | 2026-02-06 |
-| Dual-provider LLM (cloud + Ollama) | LLM_API_KEY presence auto-detects cloud mode, openai SDK with base_url | 2026-02-09 |
-| No load_dotenv() in LLMClient.__init__ | Preserves test isolation, caller loads .env | 2026-02-09 |
-| Three-table schema | Separation of concerns: raw/integrated/audit | 2026-02-06 |
-| O(n log n) merge algorithm | Optimal complexity, established pattern | 2026-02-06 |
-| YOLO mode with verification | Balance speed and quality | 2026-02-06 |
-| pd.isna() for NULL detection | Handles both NaT and None correctly | 2026-02-06 |
-| Consistent nullable schemas | All modules must support open-ended limits | 2026-02-06 |
-| IF NOT EXISTS for table creation | Idempotent operations, safe re-runs | 2026-02-06 |
-| JSON TEXT for parse_result | Flexible schema for varying LLM output formats | 2026-02-06 |
-| List[Dict] return type for parse_announcement | Supports multi-date announcements, one record per date | 2026-02-07 |
-| Minimum confidence across records for DB | Conservative quality signal for multi-record parses | 2026-02-07 |
-| Ticker-scoped LLM prompt template | Filters extraction to current ticker in multi-ticker PDFs | 2026-02-07 |
-| NULLable date fields in log | Supports operations without old/new values | 2026-02-06 |
-| GENERATED columns for computed values | Automatic open-ended limit detection | 2026-02-06 |
-| JSON TEXT for source_announcement_ids | Flexible array storage for audit trail | 2026-02-06 |
-| Table recreation for generated columns | SQLite ALTER TABLE limitation workaround | 2026-02-06 |
-| SELECT query for generated column detection | PRAGMA table_info doesn't show generated cols | 2026-02-06 |
-| Temporary directories for test isolation | Ensures test independence | 2026-02-06 |
-| unittest framework for tests | No external dependencies required | 2026-02-06 |
-| pdfplumber over PyPDF2 | Superior Chinese text extraction | 2026-02-06 |
-| Structured result dict pattern | Enables graceful error handling in batch processing | 2026-02-06 |
-| Page markers (--- Page N ---) | Preserve multi-page context for LLM parsing | 2026-02-06 |
-| qwen2.5:7b as default LLM model | Optimized for Chinese financial text | 2026-02-06 |
-| Few-shot prompting with 3 examples | Improves extraction accuracy | 2026-02-06 |
-| Return-dict error handling | Consistent pattern for batch operations | 2026-02-06 |
-| Explicit SQLite connection close | Fixes Windows file locking issues | 2026-02-06 |
-| INSERT OR REPLACE for re-processing | Idempotent PDF processing | 2026-02-06 |
-| Store non-limit announcements | Audit trail for all PDFs | 2026-02-06 |
-| Orchestration pattern | High-level class combining extraction + parse + store | 2026-02-06 |
-| max_amount REAL NOT NULL (not DEFAULT) | Every insert provides explicit value, DEFAULT was misleading | 2026-02-07 |
-| None for open-ended limit end_date | Represents genuinely open-ended limit, not last-date hack | 2026-02-07 |
-| Remove migration scripts (no real data) | Fresh table creation is the only path, no data to migrate | 2026-02-07 |
-| ASCII char classes for email regex in _clean_extracted_text | \\S+ consumed adjacent Chinese chars; ASCII [A-Za-z0-9...] limits match to standard email local-parts | 2026-03-03 |
-| _clean_extracted_text as static method on AnnouncementProcessor | No instance state needed; callable directly for testing and reuse | 2026-03-03 |
+Progress: [░░░░░░░░░░] 0% (0/7 phases across v1.0+v1.1; v1.0 Phases 1-2 complete, Phase 3 superseded by ad-hoc `postprocess.py` delivery, v1.1 Phases 4-7 not started)
 
----
+## Performance Metrics
 
-## Blockers & Concerns
+**Velocity:**
+- Total plans completed: 8 (v1.0, see archive)
+- Average duration: n/a (not tracked for v1.0)
+- Total execution time: n/a
 
-**None currently.**
+**By Phase:**
 
-**Watch for:**
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 1. Foundation (v1.0) | 4 | - | - |
+| 2. PDF Processing (v1.0) | 3 | - | - |
+| 4-7 (v1.1) | 0 | - | - |
 
-- Backward compatibility with existing mock data workflow
-- LLM extraction accuracy on Chinese announcements
-- Performance with large PDF batches
-- PDF text extraction quality (Phase 2 focus)
+**Recent Trend:** n/a — v1.1 not yet started
 
-### Quick Tasks Completed
+## Accumulated Context
 
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 001 | Unify DB schema: end_date nullable | 2026-02-07 | 59acb75 | [001-unify-db-schema-end-date-nullable](./quick/001-unify-db-schema-end-date-nullable/) |
-| 002 | LLM multi-date single-ticker parsing | 2026-02-07 | 24371f5 | [002-llm-multi-date-single-ticker-parsing](./quick/002-llm-multi-date-single-ticker-parsing/) |
-| 003 | README rewrite (full project docs) | 2026-02-08 | e49fa40 | [003-readme-md](./quick/003-readme-md/) |
-| 004 | LLM client dual-provider (cloud + Ollama) | 2026-02-09 | 9d70d35 | [004-refactor-llm-client-dual-provider-support](./quick/004-refactor-llm-client-dual-provider-support/) |
-| 005 | Preprocess PDF text before LLM (HTML/URL/email cleaning) | 2026-03-03 | 6b958e9 | [5-preprocess-exchange-announcements-before](./quick/5-preprocess-exchange-announcements-before/) |
-| 006 | Streamlit frontend UX improvements | 2026-03-03 | d441ead | [6-streamlit](./quick/6-streamlit/) |
-| 007 | Add Chinese comments | 2026-03-11 | 6373a7a | [007-add-chinese-comments](./quick/007-add-chinese-comments/) |
-| 008 | Add Chinese comments (remaining files) | 2026-03-11 | dc52772 | [008-add-chinese-comments-remaining](./quick/008-add-chinese-comments-remaining/) |
+### Decisions
 
----
+Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecting current work:
+
+- v1.1 scoping: `postprocess.py` (shipped April 2026, commits `4cc5212`/`89830c8`) supersedes the v1.0 `LimitEventTimelineBuilder` design — v1.1 hardens the delivered code rather than reviving the original plan.
+- Phase 4 (postprocess hardening) is deliberately sequenced independent of Phase 5 (LLM provider work) — different files, no code dependency, but Phase 4 is the higher-risk/higher-priority work.
+
+### Pending Todos
+
+None yet.
+
+### Blockers/Concerns
+
+- `src/data/postprocess.py` has zero dedicated unit tests, including for the `89830c8` fix itself — top risk this milestone addresses (Phase 4).
+- No retry/backoff on Kimi API calls or akshare NAV fetches; akshare has no rate limiting or schema-drift guard (Phases 5-6).
+- `requirements.txt`/`.env.example` reference the old Ollama-only setup and are missing `akshare`/`KIMI_API_KEY` (Phase 7).
+
+## Deferred Items
+
+Items acknowledged and carried forward from previous milestone close:
+
+| Category | Item | Status | Deferred At |
+|----------|------|--------|-------------|
+| Cosmetic | Downloader class naming/base-class unification | Deferred (v2) | v1.1 planning, 2026-08-18 |
+| Scale | Incremental/delta postprocessing | Deferred (v2, larger data volumes only) | v1.1 planning, 2026-08-18 |
+| Scale | Adaptive/dynamic LLM concurrency tuning | Deferred (v2) | v1.1 planning, 2026-08-18 |
 
 ## Session Continuity
 
-**Last session:** 2026-03-11T16:40:22.305Z
-**Stopped at:** Completed quick-007: Add Chinese comments
-**Resume file:** None
+Last session: 2026-08-18
+Stopped at: ROADMAP.md, STATE.md, and REQUIREMENTS.md traceability written for v1.1 (Phases 4-7)
+Resume file: None
 
-**Next action:** Begin Phase 3: Timeline Integration
-
-- Plan 03-01: Timeline integration algorithm (merge overlapping intervals)
-- Plan 03-02: Save integrated events to limit_events table
-
----
-
-## Quick Links
-
-| Artifact | Path |
-|----------|------|
-| Project Context | `.planning/PROJECT.md` |
-| Requirements | `.planning/REQUIREMENTS.md` |
-| Roadmap | `.planning/ROADMAP.md` |
-| Config | `.planning/config.json` |
-| Technical Proposal | `TECHNICAL_PROPOSAL.md` |
-| Phase 1 Summary | `.planning/phases/01-foundation/01-04-SUMMARY.md` |
-| Phase 2 - PDF Extraction | `.planning/phases/02-pdf-processing/02-01-SUMMARY.md` |
-| Phase 2 - LLM Client | `.planning/phases/02-pdf-processing/02-02-SUMMARY.md` |
-| Phase 2 - Orchestration | `.planning/phases/02-pdf-processing/02-03-SUMMARY.md` |
-| Quick 001 - Schema Unify | `.planning/quick/001-unify-db-schema-end-date-nullable/001-SUMMARY.md` |
-| Quick 002 - Multi-Date Parsing | `.planning/quick/002-llm-multi-date-single-ticker-parsing/002-SUMMARY.md` |
-| Quick 003 - README Rewrite | `.planning/quick/003-readme-md/003-SUMMARY.md` |
-| Quick 004 - Dual-Provider LLM | `.planning/quick/004-refactor-llm-client-dual-provider-support/004-SUMMARY.md` |
-
----
-
-## Test Status
-
-| Test Suite | Tests | Status |
-|------------|-------|--------|
-| test_open_ended_limits.py | 12 | ✅ Pass |
-| test_database_schema.py | 47 | ✅ Pass |
-| test_loader.py | 4 checks | ✅ Pass |
-| test_pdf_extractor.py | 9 | ✅ Pass |
-| test_llm_client.py | 35 (29+6 cloud) | ✅ Pass |
-| test_announcement_processor.py | 21 | ✅ Pass |
-| **Total** | **124+** | **✅ All Pass** |
-
----
-
-## Phase 1 Completed Deliverables
-
-### Bug Fixes (01-01)
-
-- ✅ NULL end_date handling in DataLoader._resample_limits_to_daily()
-- ✅ Fixed condition from `if end is None` to `if pd.isna(end)`
-
-### New Tables (01-02)
-
-- ✅ announcement_parses table for LLM extraction results
-- ✅ limit_event_log table for audit trail
-- ✅ Proper indexes on all tables
-
-### Schema Updates (01-03)
-
-- ✅ is_open_ended generated column (CASE WHEN end_date IS NULL THEN 1 ELSE 0 END)
-- ✅ source_announcement_ids JSON column for audit trail
-- ~~Migration script 002_update_limit_events.py~~ (removed in quick-001)
-
-### Unit Tests (01-04)
-
-- ✅ test_open_ended_limits.py (770 lines, 12 tests)
-- ✅ test_database_schema.py (930 lines, 47 tests)
-- ✅ All existing tests pass, no regressions
-
-### PDF Processing (02-01)
-
-- ✅ src/data/pdf_extractor.py - PDF text extraction with pdfplumber
-- ✅ extract_pdf_text() returns {success, text, pages, error} structure
-- ✅ Page markers (--- Page N ---) for multi-page context
-- ✅ Chinese text handling with UTF-8 encoding
-- ✅ 9 unit tests covering extraction, error handling, edge cases
-- ✅ CLI mode for manual testing
-
-### LLM Parsing (02-02)
-
-- ✅ src/data/llm_client.py - Ollama API client with structured output
-- ✅ LLMClient class with parse_announcement() method
-- ✅ Comprehensive prompt with 3 few-shot examples (complete, open-start, end-only)
-- ✅ All 4 announcement types supported (complete, open-start, end-only, modify)
-- ✅ 8-field JSON output schema with validation
-- ✅ Error handling: connection, timeout, invalid JSON
-- ✅ 17 unit tests with mocking (no Ollama required)
-- ✅ CLI mode for testing: `python src/data/llm_client.py text.txt`
-
-### Orchestration (02-03)
-
-- ✅ src/data/announcement_processor.py - End-to-end PDF processing pipeline
-- ✅ AnnouncementProcessor class with process_pdf() and process_ticker() methods
-- ✅ Integration of pdf_extractor + llm_client + database storage
-- ✅ scripts/parse_announcements.py - CLI tool with --ticker and --all options
-- ✅ Statistics tracking: total, extracted, parsed, stored, failed
-- ✅ Error continuation: individual failures don't stop batch processing
-- ✅ Audit trail: non-limit announcements stored anyway
-- ✅ 12 integration tests covering success, failure, and edge cases
-- ✅ Windows SQLite file locking fixes with explicit connection cleanup
-
----
-
-## Notes
-
-- Project initialized as brownfield (existing codebase)
-- Technical proposal already completed with detailed analysis
-- 15 v1 requirements defined across 5 categories
-- 4 phases planned, 8-12 days total estimated duration
-- **Phase 1 Foundation is complete and fully tested**
-- **Phase 2 PDF Processing is complete and fully tested**
-- Ready to begin Phase 3: Timeline Integration
-- **Quick-001:** Schema unified, migration scripts removed, generator fixed
-- **Quick-002:** LLM client returns List[Dict], supports multi-date/single-ticker parsing
-- **Quick-003:** README rewritten to reflect full project state (Phase 1-2 + pipeline docs)
-- **Quick-004:** LLMClient refactored for dual-provider (cloud OpenAI-compatible + local Ollama)
-
----
-
-*State updated: 2026-02-09 - Quick-004 COMPLETE, LLMClient dual-provider support (cloud + Ollama)*
+**Next action:** `/gsd-plan-phase 4` (Postprocess Pipeline Hardening)

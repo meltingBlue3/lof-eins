@@ -1,260 +1,96 @@
-# Roadmap: LOF Purchase Limit Enhancement
+# Roadmap: LOF Fund Arbitrage Backtesting System
 
-**Project:** LOF Fund Arbitrage Backtesting System - Purchase Limit Enhancement  
-**Created:** 2026-02-06  
-**Total Phases:** 4  
-**Total Requirements:** 15
+## Milestones
 
----
+- ✅ **v1.0 Purchase Limit Enhancement** — Phases 1-3 planned (shipped; Phase 3/4 scope delivered ad-hoc as `postprocess.py`, see note below)
+- 🚧 **v1.1 Stabilization & Refactor** — Phases 4-7 (in progress)
 
-## Phase Overview
+## Overview
 
-| Phase | Name | Goal | Requirements | Duration |
-|-------|------|------|--------------|----------|
-| 1 | Foundation | Fix critical bugs and database schema | BUG-01, BUG-02, DB-01, DB-02, DB-03 | 1-2 days |
-| 2 | PDF Processing | Extract and parse limit information from announcements | PDF-01, PDF-02, PDF-03 | 2-3 days |
-| 3 | Timeline Integration | Merge and integrate limit events | TIM-01, TIM-02, TIM-03 | 2-3 days |
-| 4 | Integration & Validation | End-to-end pipeline and verification | INT-01, INT-02, VAL-01, VAL-02 | 2-3 days |
+v1.1 does not add user-facing features. It hardens the announcement-parsing pipeline that shipped in the April 2026 Kimi/akshare rewrite (commits `4cc5212`, `89830c8`) — the same rewrite that shipped a 7x-PnL-inflation bug with no regression tests — then restores dual-provider LLM support, improves data-fetch reliability, and reconciles planning docs with the actual shipped architecture. Phases 4-7 map 1:1 onto the four requirement clusters in `.planning/REQUIREMENTS.md`.
 
----
+## Phases
 
-## Phase 1: Foundation
+**Phase Numbering:**
+- Continues from v1.0 (Phases 1-3). v1.1 starts at Phase 4 — never restart at 01.
+- Integer phases (4, 5, 6, 7): Planned milestone work.
+- Decimal phases (e.g. 4.1): Urgent insertions (marked with INSERTED).
 
-**Goal:** Fix critical bugs and establish proper database schema for open-ended limits
+- [ ] **Phase 4: Postprocess Pipeline Hardening** - Add regression tests, a hard validation gate, and transaction-safe writes to `postprocess.py`'s suspend/resume interval logic
+- [ ] **Phase 5: Dual-Provider LLM Client & Extraction Reliability** - Restore Kimi/OpenAI-compatible/Ollama provider switching with local-PDF fallback, and add retry/backoff to LLM extraction calls
+- [ ] **Phase 6: Data Fetch Reliability (akshare NAV)** - Rate-limit and schema-validate the akshare NAV fetch loop
+- [ ] **Phase 7: Planning Docs & Hygiene Reconciliation** - Correct PROJECT.md/ROADMAP.md/README.md/TECHNICAL_PROPOSAL.md and clean up requirements.txt/.env.example to match the shipped pipeline
 
-**Requirements:**
-- BUG-01: DataLoader NULL end_date handling
-- BUG-02: Database schema consistency
-- DB-01: Create announcement_parses table
-- DB-02: Update limit_events schema
-- DB-03: Create limit_event_log table
+## Phase Details
 
-**Success Criteria:**
-1. DataLoader correctly applies open-ended limits to daily series
-2. Database schema supports NULL end_date consistently across all modules
-3. All three tables created with proper indexes
-4. Unit tests pass for NULL handling edge cases
+<details>
+<summary>✅ v1.0 Purchase Limit Enhancement (Phases 1-3) - SHIPPED</summary>
 
-**Implementation Notes:**
-- Focus on backward compatibility - existing mock data workflow must continue working
-- Add comprehensive tests for the NULL end_date fix
-- Document schema changes in migration scripts
+Original phase plans and summaries are archived at `.planning/milestones/v1.0-phases/`. The originally-planned Phase 3/4 design (`LimitEventTimelineBuilder` in `src/data/timeline_builder.py`) was never built as specified — equivalent functionality shipped in April 2026 as `src/data/postprocess.py` (a different, state-machine design), outside the tracked GSD phase process, alongside the async Kimi K2.5 rewrite and the akshare NAV switch. See PROJECT.md "Validated" and "Current State" sections for what actually shipped. v1.1 (this roadmap) reconciles the docs and hardens that delivered code.
 
-**Plans:** 4 plans in 3 waves
+</details>
 
-Plans:
-- [x] 01-01-PLAN.md — Fix critical bugs (BUG-01, BUG-02)
-- [x] 01-02-PLAN.md — Create new tables (DB-01, DB-03)
-- [x] 01-03-PLAN.md — Update limit_events schema (DB-02)
-- [x] 01-04-PLAN.md — Add comprehensive unit tests
+### Phase 4: Postprocess Pipeline Hardening
 
-**Wave Structure:**
-- Wave 1: 01-01, 01-02 (parallel - bug fixes and new tables)
-- Wave 2: 01-03 (depends on schema consistency from 01-01)
-- Wave 3: 01-04 (depends on all implementation)
+**Goal**: `src/data/postprocess.py`'s suspend/resume interval-building logic (the module responsible for the `89830c8` 7x-PnL-inflation bug) has regression test coverage, a validation gate that can block bad writes, and crash-safe table writes.
+**Depends on**: Nothing (first phase of v1.1; deliberately independent of Phase 5's LLM work — highest-priority, highest-risk phase in this milestone)
+**Requirements**: STAB-01, STAB-02, STAB-03
+**Success Criteria** (what must be TRUE):
+  1. `pytest tests/test_postprocess.py` exists, passes, and includes cases for holiday-resume-in-the-middle and missing-prior-suspend synthetic-interval scenarios — regression coverage for the exact bug fixed in commit `89830c8`
+  2. `postprocess()` refuses to write `limit_events` (returns a clear error/non-zero exit rather than only printing) when `validate()` findings exceed a configurable threshold
+  3. `write_limit_events()` writes to a staging table and swaps atomically, so a run that fails partway through leaves the previous `limit_events` table intact and queryable
+  4. The full existing test suite still passes — no behavior change on the happy path (bug fixes excepted)
+**Plans**: TBD
 
----
+### Phase 5: Dual-Provider LLM Client & Extraction Reliability
 
-## Phase 2: PDF Processing ✅ COMPLETE (2026-02-06)
+**Goal**: `LLMClient` can be pointed at Kimi K2.5, another OpenAI-compatible cloud API, or local Ollama via configuration, with a local-PDF-extraction fallback for providers without file-upload support, and transient API errors are retried with backoff — all without changing default (Kimi) behavior.
+**Depends on**: Nothing (independent of Phase 4 — different files/subsystem; may proceed in parallel or before/after per milestone priority)
+**Requirements**: LLM-01, LLM-02, LLM-03, REL-01
+**Success Criteria** (what must be TRUE):
+  1. `LLMClient` accepts `base_url`/`api_key`/`model` configuration that switches between Kimi K2.5, another OpenAI-compatible endpoint, and local Ollama, demonstrated by tests/runs exercising each mode
+  2. When configured for a provider without file-upload support (e.g. Ollama), extraction runs `pdf_extractor.py`'s local text extraction before the chat-completion call and produces correct records for a sample PDF
+  3. Running `scripts/parse_announcements.py` with default configuration (no provider override) produces the same extraction behavior as before this phase — existing Kimi-path tests still pass unchanged
+  4. A transient LLM API error (429/5xx/timeout) is retried with backoff and a PDF is only marked failed after retries are exhausted, verified by a test simulating a transient failure
+**Plans**: TBD
 
-**Goal:** Extract limit information from downloaded PDF announcements using local LLM
+### Phase 6: Data Fetch Reliability (akshare NAV)
 
-**Requirements:**
-- ✅ PDF-01: PDF text extraction
-- ✅ PDF-02: LLM parsing of limit information
-- ✅ PDF-03: Store raw parse results
+**Goal**: The akshare NAV fetch loop in `RealDataDownloader` is resilient to rate limits and fails loudly instead of silently on upstream schema drift.
+**Depends on**: Nothing (independent — touches `src/data/downloader.py` only, unrelated to Phases 4/5)
+**Requirements**: REL-02, REL-03
+**Success Criteria** (what must be TRUE):
+  1. `_get_nav_data()`'s per-ticker loop pauses between akshare calls, matching the existing rate-limiting pattern already used by the JoinQuant batch loop and the announcement downloader
+  2. akshare NAV response columns are validated against the expected schema immediately after fetch; a schema mismatch raises/logs a clear error instead of silently producing empty or garbage NAV data, verified by a test simulating an unexpected column set
+**Plans**: TBD
 
-**Success Criteria:**
-1. ✅ Successfully extract text from 95%+ of downloaded PDFs
-2. ✅ LLM correctly identifies limit information in 90%+ of announcements
-3. ✅ Parse results stored with proper JSON structure
-4. ✅ Chinese text handling works correctly
+### Phase 7: Planning Docs & Hygiene Reconciliation
 
-**Verification:** 16/16 must-haves verified
-**Tests:** 38/38 passing (97+ total project tests)
+**Goal**: PROJECT.md/ROADMAP.md, README.md/TECHNICAL_PROPOSAL.md, requirements.txt, and .env.example all accurately describe the shipped pipeline (dual-provider LLM client, `postprocess.py` state machine, akshare NAV) instead of the original Ollama-only / `LimitEventTimelineBuilder` design.
+**Depends on**: Phase 4, Phase 5, Phase 6 (documents the final architecture shipped across this milestone, including the new provider-config env vars from Phase 5 and reliability additions from Phases 4/6)
+**Requirements**: DOC-01, DOC-02, HYG-01, HYG-02
+**Success Criteria** (what must be TRUE):
+  1. PROJECT.md and ROADMAP.md describe the shipped architecture (async Kimi K2.5 → dual-provider LLM client, `postprocess.py` state machine, akshare NAV) with no lingering references to the original Ollama-only / `LimitEventTimelineBuilder` design as if still pending
+  2. README.md and TECHNICAL_PROPOSAL.md describe the current pipeline — `postprocess.py` documented as the timeline-integration step, no lingering Ollama-only claims
+  3. `requirements.txt` matches actual imports: unused `ollama` package removed, `akshare` present
+  4. `.env.example` documents every env var the codebase actually reads, including LLM provider config (base_url/api_key/model switching from Phase 5), `KIMI_API_KEY`, and `JQ_USERNAME`/`JQ_PASSWORD`
+**Plans**: TBD
 
-**Implementation Notes:**
-- Use pdfplumber (better Chinese support) or PyPDF2
-- Design robust prompt with few-shot examples
-- Handle LLM API errors gracefully
-- Cache extraction results to avoid re-processing
+## Progress
 
-**Plans:** 3 plans in 2 waves
+**Execution Order:**
+Phases 4, 5, and 6 have no hard interdependency and may be executed in any order (Phase 4 is highest-priority per milestone goal). Phase 7 executes last, after Phases 4-6.
 
-Plans:
-- [x] 02-01-PLAN.md — PDF text extraction module (pdfplumber)
-- [x] 02-02-PLAN.md — LLM client for parsing (Ollama API)
-- [x] 02-03-PLAN.md — Orchestration and CLI tool
-
-**Wave Structure:**
-- Wave 1: 02-01, 02-02 (parallel - extraction and LLM client independent)
-- Wave 2: 02-03 (depends on both 02-01 and 02-02)
-
-**Key Files:**
-- `src/data/pdf_extractor.py` - Text extraction
-- `src/data/llm_client.py` - Ollama API client
-- `src/data/announcement_processor.py` - Orchestration
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|-----------------|--------|-----------|
+| 1. Foundation | v1.0 | 4/4 | Complete | 2026-02-06 |
+| 2. PDF Processing | v1.0 | 3/3 | Complete | 2026-02-06 |
+| 3. Timeline Integration | v1.0 | — | Superseded by `postprocess.py` (shipped outside GSD process) | 2026-04 |
+| 4. Postprocess Pipeline Hardening | v1.1 | 0/? | Not started | - |
+| 5. Dual-Provider LLM Client & Extraction Reliability | v1.1 | 0/? | Not started | - |
+| 6. Data Fetch Reliability (akshare NAV) | v1.1 | 0/? | Not started | - |
+| 7. Planning Docs & Hygiene Reconciliation | v1.1 | 0/? | Not started | - |
 
 ---
 
-## Phase 3: Timeline Integration
-
-**Goal:** Merge overlapping limit periods into coherent timeline
-
-**Requirements:**
-- TIM-01: Timeline integration algorithm
-- TIM-02: Interval merging
-- TIM-03: Save to limit_events
-
-**Success Criteria:**
-1. Four announcement types handled correctly
-2. Overlapping intervals merged with O(n log n) efficiency
-3. Open-ended limits properly closed by end-only announcements
-4. Final timeline has no gaps or overlaps
-
-**Implementation Notes:**
-- Implement state machine for handling announcement sequences
-- Test edge cases: multiple open-starts, end without start, etc.
-- Preserve source announcement IDs for audit trail
-- Add validation to detect anomalies
-
-**Tasks:**
-1. Implement `LimitEventTimelineBuilder` class
-2. Implement merge algorithm
-3. Create save operations for integrated events
-4. Write comprehensive unit tests
-5. Test with real announcement sequences
-
-**Key Files:**
-- `src/data/timeline_builder.py` - Core integration logic
-- `tests/test_timeline_integration.py` - Unit tests
-
-**Algorithm Overview:**
-```
-Sort by announcement_date →
-Process by type (complete/open-start/end-only) →
-Merge overlapping intervals →
-Save to limit_events
-```
-
----
-
-## Phase 4: Integration & Validation
-
-**Goal:** End-to-end pipeline and verification
-
-**Requirements:**
-- INT-01: CLI script for processing
-- INT-02: Populate database with real data
-- VAL-01: Backtest limit application
-- VAL-02: Timeline validation
-
-**Success Criteria:**
-1. Single command processes all announcements for a ticker
-2. Real limit data populated in fund_status.db
-3. Backtest correctly restricts trades during limit periods
-4. Validation detects timeline issues
-
-**Implementation Notes:**
-- Create `process_announcements.py` CLI
-- Add progress bars and statistics
-- Test with multiple tickers
-- Validate against manual inspection
-
-**Tasks:**
-1. Build CLI script with argument parsing
-2. Add error handling and logging
-3. Implement validation checks
-4. Run end-to-end test with real data
-5. Document usage in README
-
-**Key Files:**
-- `scripts/process_announcements.py` - Main CLI
-- `src/data/validation.py` - Timeline validation
-
-**Usage Example:**
-```bash
-# Process single ticker
-python scripts/process_announcements.py --ticker 161005
-
-# Process all tickers
-python scripts/process_announcements.py --all
-
-# Run backtest with real limits
-python run_backtest.py --config configs/backtest.yaml
-```
-
----
-
-## Dependencies Between Phases
-
-```
-Phase 1 (Foundation)
-    │
-    ├── Required by ──▶ Phase 2 (PDF Processing) - needs DB schema
-    │
-    └── Required by ──▶ Phase 3 (Timeline Integration) - needs NULL handling
-
-Phase 2 (PDF Processing)
-    │
-    └── Required by ──▶ Phase 3 (Timeline Integration) - needs parse results
-
-Phase 3 (Timeline Integration)
-    │
-    └── Required by ──▶ Phase 4 (Integration) - needs integrated events
-
-Phase 4 (Integration & Validation)
-    └── Standalone, depends on all previous phases
-```
-
----
-
-## Risk Mitigation
-
-| Phase | Risk | Mitigation |
-|-------|------|------------|
-| 1 | Breaking existing tests | Run full test suite after each change |
-| 2 | LLM extraction accuracy | Validate on sample, adjust prompt, use confidence threshold |
-| 3 | Complex timeline edge cases | Comprehensive unit tests, manual validation |
-| 4 | Performance issues | Batch processing, caching, progress tracking |
-
----
-
-## Success Metrics by Phase
-
-### Phase 1 ✅ COMPLETE
-- [x] All existing tests pass
-- [x] New NULL handling tests pass
-- [x] Database migrations run successfully
-
-### Phase 2 ✅ COMPLETE
-- [x] 95%+ PDF extraction success rate
-- [x] 90%+ LLM parsing accuracy (pending validation on sample)
-- [x] End-to-end pipeline: extract → parse → store
-- [x] CLI tool for single ticker and batch processing
-- [x] 12 integration tests passing
-
-### Phase 3
-- [ ] 100% test coverage for merge algorithm
-- [ ] No overlapping events in output
-- [ ] Correct handling of all 4 announcement types
-
-### Phase 4
-- [ ] End-to-end pipeline completes without errors
-- [ ] Backtest results differ when limits applied (validation)
-- [ ] Timeline validation catches artificial errors
-
----
-
-## Next Steps
-
-**Immediate:** Begin Phase 3: Timeline Integration
-
-**Preparation:**
-1. Review announcement_parses table data structure
-2. Design timeline merge algorithm for 4 announcement types
-3. Plan integration with limit_events table
-
----
-
-*Roadmap created: 2026-02-06*
+*Roadmap created: 2026-02-06 (v1.0) — updated 2026-08-18 for milestone v1.1*
