@@ -129,7 +129,7 @@ Phases 4, 5, and 6 have no hard interdependency and may be executed in any order
 
 Captured from Phase 4's real-data validation checkpoint (`04-04`, decision: `triage-data` for the 390 blocking validation findings; this item is the separate "give overlap resolution a proper home" follow-up the checkpoint context called for). Evidence:
 
-- 529 overlapping interval pairs across 77 distinct funds, measured by `build_limit_events()` against a copy of the real `fund_status.db` — see `.planning/phases/04-postprocess-pipeline-hardening/04-REAL-DB-VALIDATION.md` section 3b.
+- 504 overlapping interval pairs across 75 distinct funds, measured by `build_limit_events()` against a copy of the real `fund_status.db` (re-measured after 04's code-review fixes, `541ba08`) — see `.planning/phases/04-postprocess-pipeline-hardening/04-REAL-DB-VALIDATION.md` sections 3b and 8.
 - Pre-existing test failure `test_overlapping_limits_last_one_wins` (`tests/test_open_ended_limits.py`) — same underlying gap, unresolved since before Phase 4 and explicitly out of scope for it (see `.planning/REQUIREMENTS.md` Out of Scope table and `04-REAL-DB-VALIDATION.md` section 5).
 - Lives in `src/data/loader.py` and `src/backtest/engine.py`, not `src/data/postprocess.py` — outside Phase 4's module boundary.
 

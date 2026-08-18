@@ -185,5 +185,53 @@ The following are presented as evidence only. Nothing below has been decided by 
 
 3. **The pre-existing `test_overlapping_limits_last_one_wins` failure** (section 5) and **the 529 overlapping interval pairs across 77 funds** (section 3b), both in loader/engine limit-application logic that REQUIREMENTS places out of scope for this milestone. These are related symptoms of the same underlying gap (overlapping suspend/restrict intervals are not resolved before being applied to trading signals) and want a home — the checkpoint's `new-phase` option addresses this explicitly regardless of which option is chosen for finding 1.
 
+## 8. Addendum: re-measured after code-review fixes (2026-08-18, post `541ba08`)
+
+Sections 1-7 above measured the pipeline as it stood after plans 04-01 through 04-03, before
+the phase-level code review (`04-REVIEW.md`) and its fixes (`04-REVIEW-FIX.md`) landed. Three
+of those fixes directly change the numbers this report is built on:
+
+- **CR-02 / WR-01** reworked `validate()`'s open-restriction pairing from a LIFO stack to a
+  forward-nearest search that also respects holiday resumes, matching `build_limit_events()`.
+  This is exactly the "aligned to skip holiday resumes" scenario section 4 measured in isolation
+  (predicted 373 → 609) — but the shipped fix *also* corrected the LIFO false-positive pairing
+  bug WR-01 found, which pulls the count back down. Net effect measured against the real
+  database: **373 → 417** staleness findings, not 609 — the holiday-resume correction and the
+  false-positive pairing correction partially offset.
+- **CR-03** stopped `build_limit_events()` from overwriting an announcement's own `end_date`
+  with a date derived from an unrelated later resume. This shortens some intervals that were
+  previously artificially extended, which reduced measured interval overlaps.
+- **CR-01** added a guard that blocks the write outright if non-empty input records derive zero
+  intervals. Re-running against production data: this guard did not fire (interval count is
+  unchanged at 3,334), so it has no effect on the current dataset's finding count, but it is now
+  live protection for any future run that would otherwise have wiped `limit_events`.
+
+**Re-measured counts** (same methodology as sections 1-3; production `fund_status.db` copied
+read-only into a fresh scratch directory, `git status --porcelain` on the production file
+confirmed empty afterward):
+
+| Metric | Original (pre-fix) | Re-measured (post-fix, `541ba08`) | Change |
+|---|---|---|---|
+| Total validation findings | 390 | **434** | +44 |
+| Staleness findings | 373 | **417** | +44 |
+| Distinct funds (staleness) | 109 | **106** | -3 |
+| Date-order inversions | 17 | 17 | unchanged |
+| Total intervals | 3,334 | 3,334 | unchanged |
+| Overlapping interval pairs (adjacent-pair method) | 529 | **504** | -25 |
+| Distinct funds (overlap) | 77 | **75** | -2 |
+
+**Effect on the `triage-data` decision:** The decision itself does not change — `triage-data`
+means the block stays in force and findings are triaged as real data-quality issues, and that
+remains the right call. What changes is the volume: the operator now has **434 findings to
+triage, not 390** (44 more, all in the staleness category), because `validate()` is now more
+correct about which suspensions are genuinely still open. This is expected and intended: the
+fixed pairing logic catches real staleness cases the pre-fix code was silently letting a holiday
+resume paper over (see `04-REVIEW.md` CR-02). The `999.1` backlog item's overlap-count evidence
+is superseded by the 504/75 figures above; no other action item changes.
+
+Full test suite after all fixes: 141 tests, 1 pre-existing out-of-scope failure
+(`test_overlapping_limits_last_one_wins`), 4 skipped, no new failures — confirmed by
+`04-REVIEW-FIX.md`.
+
 ---
 *Phase: 04-postprocess-pipeline-hardening — Plan 04*
