@@ -418,6 +418,53 @@ class TestValidateHolidayResumeStaleness(PostprocessDBTestCase):
         )
 
 
+class TestPostprocessRawStat(PostprocessDBTestCase):
+    """WR-02 regression: stats["raw"] must reflect the pre-dedup record
+    count, not the post-dedup count records is reassigned to."""
+
+    def test_raw_stat_reflects_pre_dedup_count_when_duplicates_removed(self):
+        self._seed_subscription_restrictions([
+            {
+                "fund_code": "160105",
+                "announcement_date": "2022-01-05",
+                "effective_date": "2022-01-14",
+                "action": "restrict",
+                "restriction_type": "amount_limit",
+                "limit_amount": 1000000,
+                "source_file": "a.pdf",
+            },
+            {
+                # Same (fund_code, effective_date, action) key as above ->
+                # dedup_records() collapses these two into one.
+                "fund_code": "160105",
+                "announcement_date": "2022-01-10",
+                "effective_date": "2022-01-14",
+                "action": "restrict",
+                "restriction_type": "amount_limit",
+                "limit_amount": 1000000,
+                "source_file": "a_dup.pdf",
+            },
+            {
+                "fund_code": "160105",
+                "announcement_date": "2022-01-18",
+                "effective_date": "2022-01-19",
+                "action": "resume",
+                "restriction_type": "amount_limit",
+                "source_file": "b.pdf",
+            },
+        ])
+
+        stats = postprocess(self.db_path)
+
+        self.assertEqual(stats["raw"], 3)
+        self.assertEqual(stats["deduped"], 2)
+        self.assertNotEqual(
+            stats["raw"],
+            stats["deduped"],
+            "raw and deduped stats collapsed to the same (post-dedup) count",
+        )
+
+
 class TestValidateForwardNearestPairing(PostprocessDBTestCase):
     """WR-01 regression: validate()'s open-restriction pairing must mirror
     build_limit_events()'s forward-nearest semantics, not a LIFO stack --

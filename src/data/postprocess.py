@@ -501,7 +501,8 @@ def postprocess(db_path: str | Path) -> dict:
     db_path = Path(db_path)
 
     records = load_records(db_path)
-    print(f"加载 {len(records)} 条原始记录")
+    raw_count = len(records)
+    print(f"加载 {raw_count} 条原始记录")
 
     if not records:
         print("无记录，跳过后处理")
@@ -525,7 +526,7 @@ def postprocess(db_path: str | Path) -> dict:
     write_limit_events(db_path, events)
 
     return {
-        "raw": len(records),
+        "raw": raw_count,
         "deduped": len(records),
         "intervals": len(events),
     }
