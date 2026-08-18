@@ -119,4 +119,22 @@ Phases 4, 5, and 6 have no hard interdependency and may be executed in any order
 
 ---
 
+## Backlog
+
+### Phase 999.1: Resolve overlapping suspend/restrict intervals (BACKLOG)
+
+**Goal:** [Captured for future planning] Resolve overlapping suspend/restrict intervals in loader and engine limit-application logic, so overlapping intervals are deconflicted before being applied to trading signals instead of leaving the "last one wins" behavior unverified.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Captured from Phase 4's real-data validation checkpoint (`04-04`, decision: `triage-data` for the 390 blocking validation findings; this item is the separate "give overlap resolution a proper home" follow-up the checkpoint context called for). Evidence:
+- 529 overlapping interval pairs across 77 distinct funds, measured by `build_limit_events()` against a copy of the real `fund_status.db` — see `.planning/phases/04-postprocess-pipeline-hardening/04-REAL-DB-VALIDATION.md` section 3b.
+- Pre-existing test failure `test_overlapping_limits_last_one_wins` (`tests/test_open_ended_limits.py`) — same underlying gap, unresolved since before Phase 4 and explicitly out of scope for it (see `.planning/REQUIREMENTS.md` Out of Scope table and `04-REAL-DB-VALIDATION.md` section 5).
+- Lives in `src/data/loader.py` and `src/backtest/engine.py`, not `src/data/postprocess.py` — outside Phase 4's module boundary.
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+---
+
 *Roadmap created: 2026-02-06 (v1.0) — updated 2026-08-18 for milestone v1.1*
