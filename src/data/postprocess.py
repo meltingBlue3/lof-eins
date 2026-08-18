@@ -426,15 +426,31 @@ def validate(records: List[dict]) -> List[str]:
                     f"未知的 restriction_type: {rtype}"
                 )
 
-        # Check: restrict/suspend should have resume (non-holiday)
+        # Check: restrict/suspend should have resume (non-holiday).
+        #
+        # Mirrors build_limit_events()'s actual pairing semantics (WR-01):
+        # each restrict/suspend independently searches forward for the
+        # nearest following non-holiday resume, rather than popping off a
+        # LIFO stack. A LIFO stack disagrees with build_limit_events() when
+        # two restrictions are open at once and a single later resume
+        # legitimately closes both -- build_limit_events() closes both,
+        # but a stack only pops one, leaving the other falsely flagged as
+        # unresolved and blocking a legitimate run.
         open_restrictions = []
-        for r in fund_records:
-            if r["action"] in ("restrict", "suspend"):
-                if r.get("restriction_type") not in ("holiday_suspension",):
-                    open_restrictions.append(r)
-            elif r["action"] == "resume":
-                if open_restrictions and not _is_holiday_resume(r):
-                    open_restrictions.pop()
+        for idx, r in enumerate(fund_records):
+            if r["action"] not in ("restrict", "suspend"):
+                continue
+            rtype = r.get("restriction_type")
+            if rtype in ("holiday_suspension", "application_invalid"):
+                # Inherently single-day, same as build_limit_events() --
+                # never left "open" waiting on a resume.
+                continue
+            found_resume = any(
+                nxt["action"] == "resume" and not _is_holiday_resume(nxt)
+                for nxt in fund_records[idx + 1 :]
+            )
+            if not found_resume:
+                open_restrictions.append(r)
 
         for r in open_restrictions:
             try:

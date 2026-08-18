@@ -418,6 +418,59 @@ class TestValidateHolidayResumeStaleness(PostprocessDBTestCase):
         )
 
 
+class TestValidateForwardNearestPairing(PostprocessDBTestCase):
+    """WR-01 regression: validate()'s open-restriction pairing must mirror
+    build_limit_events()'s forward-nearest semantics, not a LIFO stack --
+    two stacked restrict records closed by the same later resume must both
+    be recognised as closed, matching build_limit_events()."""
+
+    def test_two_stacked_restricts_closed_by_same_later_resume_are_both_recognised_closed(self):
+        now = datetime.now()
+        first_eff = now - timedelta(days=400)
+        second_eff = first_eff + timedelta(days=10)
+        resume_eff = second_eff + timedelta(days=5)
+        records = [
+            {
+                "fund_code": "160105",
+                "announcement_date": (first_eff - timedelta(days=1)).strftime("%Y-%m-%d"),
+                "effective_date": first_eff.strftime("%Y-%m-%d"),
+                "action": "restrict",
+                "restriction_type": "amount_limit",
+                "source_file": "a.pdf",
+            },
+            {
+                "fund_code": "160105",
+                "announcement_date": (second_eff - timedelta(days=1)).strftime("%Y-%m-%d"),
+                "effective_date": second_eff.strftime("%Y-%m-%d"),
+                "action": "restrict",
+                "restriction_type": "amount_limit",
+                "source_file": "b.pdf",
+            },
+            {
+                "fund_code": "160105",
+                "announcement_date": resume_eff.strftime("%Y-%m-%d"),
+                "effective_date": resume_eff.strftime("%Y-%m-%d"),
+                "action": "resume",
+                "restriction_type": "amount_limit",
+                "source_file": "c.pdf",
+            },
+        ]
+
+        # build_limit_events() closes both restrictions off the single
+        # later resume.
+        events = build_limit_events(records)
+        self.assertEqual(len(events), 2)
+        for ev in events:
+            self.assertIsNotNone(ev["end_date"])
+
+        # validate() must agree: no unresolved-restriction finding.
+        issues = validate(records)
+        self.assertFalse(
+            any("无对应resume" in i for i in issues),
+            f"expected no unresolved-restriction finding, got: {issues}",
+        )
+
+
 class TestExplicitEndDatePrecedence(PostprocessDBTestCase):
     """CR-03 regression: a restrict/suspend record that already carries its
     own explicit end_date from the announcement must keep it, even when an
