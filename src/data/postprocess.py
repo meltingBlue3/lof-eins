@@ -113,6 +113,15 @@ def fix_resume_type(records: List[dict]) -> List[dict]:
     """
     Fill missing restriction_type on resume records
     by inheriting from the nearest preceding suspend/restrict.
+
+    Note (WR-04): 'adjust_rule' is a legal value of the
+    subscription_restrictions.action CHECK constraint, but it deliberately
+    does not update last_type here (nor does build_limit_events() or
+    validate() match on it elsewhere) -- an adjust_rule record represents a
+    change to an existing restriction's rules, not a new suspend/restrict
+    state, so it intentionally never produces a limit_events interval and
+    is never referenced in source_announcement_ids. See
+    tests.test_postprocess.TestAdjustRuleIsIntentionalNoOp.
     """
     fixed = 0
     by_fund = defaultdict(list)
@@ -203,6 +212,12 @@ def build_limit_events(records: List[dict]) -> List[dict]:
         while i < len(fund_records):
             r = fund_records[i]
 
+            # WR-04: 'adjust_rule' (a legal action value) intentionally
+            # falls through this branch untouched -- it represents a rule
+            # change to an existing restriction rather than a new
+            # suspend/restrict state, so it produces no limit_events
+            # interval. See fix_resume_type()'s docstring note and
+            # tests.test_postprocess.TestAdjustRuleIsIntentionalNoOp.
             if r["action"] in ("suspend", "restrict", "invalidate"):
                 start = r["effective_date"]
                 end = r.get("end_date")
@@ -426,7 +441,11 @@ def validate(records: List[dict]) -> List[str]:
                     f"未知的 restriction_type: {rtype}"
                 )
 
-        # Check: restrict/suspend should have resume (non-holiday).
+        # Check: restrict/suspend should have resume (non-holiday). Only
+        # 'restrict'/'suspend' are considered here -- 'adjust_rule' is
+        # intentionally excluded (WR-04, same as build_limit_events() and
+        # fix_resume_type()): it represents a rule change, not a new open
+        # restriction awaiting a resume.
         #
         # Mirrors build_limit_events()'s actual pairing semantics (WR-01):
         # each restrict/suspend independently searches forward for the

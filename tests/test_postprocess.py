@@ -26,6 +26,7 @@ from src.data.postprocess import (
     KNOWN_RESTRICTION_TYPES,
     ValidationBlockedError,
     build_limit_events,
+    fix_resume_type,
     load_records,
     postprocess,
     validate,
@@ -415,6 +416,68 @@ class TestValidateHolidayResumeStaleness(PostprocessDBTestCase):
         self.assertTrue(
             any("161129" in i and "无对应resume" in i for i in issues),
             f"expected a staleness finding for 161129, got: {issues}",
+        )
+
+
+class TestAdjustRuleIsIntentionalNoOp(PostprocessDBTestCase):
+    """WR-04: 'adjust_rule' is a legal subscription_restrictions.action
+    value, but is intentionally a no-op at every stage of the pipeline --
+    it represents a rule change to an existing restriction, not a new
+    suspend/restrict state. This pins that behavior so a future change
+    that silently starts (or silently stops) handling it is caught."""
+
+    def test_fix_resume_type_does_not_treat_adjust_rule_as_a_restriction_start(self):
+        records = [
+            {
+                "fund_code": "160105",
+                "effective_date": "2022-01-01",
+                "action": "adjust_rule",
+                "restriction_type": "amount_limit",
+                "source_file": "a.pdf",
+            },
+            {
+                "fund_code": "160105",
+                "effective_date": "2022-01-05",
+                "action": "resume",
+                "restriction_type": None,
+                "source_file": "b.pdf",
+            },
+        ]
+        fixed = fix_resume_type(records)
+        # The resume's restriction_type must remain unset: adjust_rule is
+        # not a suspend/restrict/invalidate, so it must not seed last_type.
+        self.assertIsNone(fixed[1]["restriction_type"])
+
+    def test_build_limit_events_produces_no_interval_for_adjust_rule(self):
+        records = [
+            {
+                "fund_code": "160105",
+                "effective_date": "2022-01-01",
+                "end_date": None,
+                "action": "adjust_rule",
+                "restriction_type": "amount_limit",
+                "limit_amount": 500000,
+                "reason": None,
+                "source_file": "a.pdf",
+            }
+        ]
+        self.assertEqual(build_limit_events(records), [])
+
+    def test_validate_does_not_flag_adjust_rule_as_an_unresolved_restriction(self):
+        records = [
+            {
+                "fund_code": "160105",
+                "announcement_date": "2022-01-01",
+                "effective_date": "2022-01-01",
+                "action": "adjust_rule",
+                "restriction_type": "amount_limit",
+                "source_file": "a.pdf",
+            }
+        ]
+        issues = validate(records)
+        self.assertFalse(
+            any("无对应resume" in i for i in issues),
+            f"adjust_rule was flagged as an unresolved restriction: {issues}",
         )
 
 
