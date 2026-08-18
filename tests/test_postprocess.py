@@ -23,10 +23,13 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 from src.data.postprocess import (
+    KNOWN_RESTRICTION_TYPES,
     ValidationBlockedError,
     build_limit_events,
+    load_records,
     postprocess,
     validate,
+    write_limit_events,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -368,6 +371,241 @@ class TestEmptyInput(PostprocessDBTestCase):
         self.assertEqual(stats["intervals"], 0)
         after = self._read_limit_events()
         self.assertEqual(before, after)
+
+
+class TestUnknownRestrictionType(PostprocessDBTestCase):
+    """D-06 scenario 5: an unrecognised non-empty restriction_type must fail
+    loudly (build_limit_events raises, validate() flags it), while None/empty
+    (the "unspecified" case 32 production records rely on after
+    fix_resume_type() runs) remain tolerated exactly as before."""
+
+    def test_known_restriction_types_constant_matches_check_constraint(self):
+        # Mirrors the subscription_restrictions CHECK constraint in
+        # src/data/downloader.py -- see the constant's own comment.
+        self.assertEqual(
+            sorted(KNOWN_RESTRICTION_TYPES),
+            [
+                "amount_limit",
+                "application_invalid",
+                "full_suspension",
+                "holiday_suspension",
+                "pre_holiday_suspension",
+                "rule_change",
+            ],
+        )
+
+    def test_build_limit_events_raises_on_unknown_restriction_type(self):
+        records = [
+            {
+                "fund_code": "160105",
+                "effective_date": "2022-01-14",
+                "end_date": None,
+                "action": "restrict",
+                "restriction_type": "brand_new_type",
+                "limit_amount": None,
+                "reason": "future restriction type",
+                "source_file": "x.pdf",
+            }
+        ]
+        with self.assertRaises(ValueError) as ctx:
+            build_limit_events(records)
+        self.assertIn("brand_new_type", str(ctx.exception))
+
+    def test_validate_returns_finding_for_unknown_restriction_type(self):
+        records = [
+            {
+                "fund_code": "160105",
+                "announcement_date": "2022-01-10",
+                "effective_date": "2022-01-14",
+                "action": "restrict",
+                "restriction_type": "brand_new_type",
+                "source_file": "x.pdf",
+            }
+        ]
+        issues = validate(records)
+        self.assertTrue(
+            any("brand_new_type" in i and "160105" in i for i in issues),
+            f"expected an issue naming brand_new_type and 160105, got: {issues}",
+        )
+
+    def test_validate_none_restriction_type_produces_no_unknown_type_finding(self):
+        records = [
+            {
+                "fund_code": "160105",
+                "announcement_date": "2022-01-10",
+                "effective_date": "2022-01-14",
+                "action": "restrict",
+                "restriction_type": None,
+                "source_file": "x.pdf",
+            },
+            {
+                "fund_code": "160105",
+                "announcement_date": "2022-01-18",
+                "effective_date": "2022-01-19",
+                "action": "resume",
+                "restriction_type": None,
+                "source_file": "y.pdf",
+            },
+        ]
+        issues = validate(records)
+        self.assertFalse(
+            any("未知" in i for i in issues),
+            f"expected no unknown-type finding, got: {issues}",
+        )
+
+    def test_build_limit_events_tolerates_none_restriction_type(self):
+        records = [
+            {
+                "fund_code": "160105",
+                "effective_date": "2022-01-14",
+                "end_date": None,
+                "action": "restrict",
+                "restriction_type": None,
+                "limit_amount": None,
+                "reason": None,
+                "source_file": "x.pdf",
+            },
+            {
+                "fund_code": "160105",
+                "effective_date": "2022-01-19",
+                "action": "resume",
+                "restriction_type": None,
+                "source_file": "y.pdf",
+            },
+        ]
+        events = build_limit_events(records)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["start_date"], "2022-01-14")
+        self.assertEqual(events[0]["end_date"], "2022-01-18")
+
+    def test_build_limit_events_tolerates_empty_string_restriction_type(self):
+        records = [
+            {
+                "fund_code": "160105",
+                "effective_date": "2022-01-14",
+                "end_date": None,
+                "action": "restrict",
+                "restriction_type": "",
+                "limit_amount": None,
+                "reason": None,
+                "source_file": "x.pdf",
+            },
+            {
+                "fund_code": "160105",
+                "effective_date": "2022-01-19",
+                "action": "resume",
+                "restriction_type": "",
+                "source_file": "y.pdf",
+            },
+        ]
+        events = build_limit_events(records)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["start_date"], "2022-01-14")
+        self.assertEqual(events[0]["end_date"], "2022-01-18")
+
+    def test_all_known_restriction_types_accepted(self):
+        for rtype in sorted(KNOWN_RESTRICTION_TYPES):
+            records = [
+                {
+                    "fund_code": "160105",
+                    "effective_date": "2022-01-14",
+                    "end_date": None,
+                    "action": "restrict",
+                    "restriction_type": rtype,
+                    "limit_amount": 1000000 if rtype == "amount_limit" else None,
+                    "reason": None,
+                    "source_file": "x.pdf",
+                }
+            ]
+            try:
+                build_limit_events(records)
+            except ValueError as e:
+                self.fail(f"known restriction_type {rtype!r} raised unexpectedly: {e}")
+
+
+class TestIntervalOrdering(PostprocessDBTestCase):
+    """Inverted-interval clamp: a suspend/restrict paired with a non-holiday
+    resume on the same effective_date must never produce a backwards
+    interval, and build_limit_events() must be deterministic."""
+
+    def test_suspend_and_non_holiday_resume_same_day_clamps_to_single_day(self):
+        records = [
+            {
+                "fund_code": "160105",
+                "effective_date": "2022-03-01",
+                "end_date": None,
+                "action": "restrict",
+                "restriction_type": "amount_limit",
+                "limit_amount": 500000,
+                "reason": None,
+                "source_file": "a.pdf",
+            },
+            {
+                "fund_code": "160105",
+                "effective_date": "2022-03-01",
+                "action": "resume",
+                "restriction_type": "amount_limit",
+                "source_file": "b.pdf",
+            },
+        ]
+        events = build_limit_events(records)
+        self.assertEqual(len(events), 1)
+        ev = events[0]
+        self.assertEqual(ev["start_date"], "2022-03-01")
+        self.assertEqual(ev["end_date"], "2022-03-01")
+        for e in events:
+            if e["end_date"] is not None:
+                self.assertGreaterEqual(
+                    e["end_date"], e["start_date"],
+                    f"interval runs backwards: {e}",
+                )
+
+    def test_build_limit_events_twice_on_same_input_yields_identical_output(self):
+        records = [
+            {
+                "fund_code": "160105",
+                "effective_date": "2022-01-14",
+                "end_date": None,
+                "action": "restrict",
+                "restriction_type": "amount_limit",
+                "limit_amount": 1000000,
+                "reason": "r1",
+                "source_file": "a.pdf",
+            },
+            {
+                "fund_code": "160105",
+                "effective_date": "2022-01-19",
+                "action": "resume",
+                "restriction_type": "amount_limit",
+                "source_file": "b.pdf",
+            },
+        ]
+        first = build_limit_events(records)
+        second = build_limit_events(records)
+        self.assertEqual(first, second)
+
+    def test_records_sharing_effective_date_preserve_id_order_after_load(self):
+        self._seed_subscription_restrictions([
+            {
+                "fund_code": "160105",
+                "announcement_date": "2022-01-01",
+                "effective_date": "2022-03-01",
+                "action": "suspend",
+                "restriction_type": "full_suspension",
+                "source_file": "a.pdf",
+            },
+            {
+                "fund_code": "160105",
+                "announcement_date": "2022-01-01",
+                "effective_date": "2022-03-01",
+                "action": "resume",
+                "restriction_type": "full_suspension",
+                "source_file": "b.pdf",
+            },
+        ])
+        records = load_records(self.db_path)
+        self.assertEqual(records[0]["action"], "suspend")
+        self.assertEqual(records[1]["action"], "resume")
 
 
 if __name__ == "__main__":
