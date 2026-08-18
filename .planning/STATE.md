@@ -5,15 +5,15 @@ milestone_name: Stabilization & Refactor
 current_phase: 04
 current_phase_name: postprocess-pipeline-hardening
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-08-18T12:38:04.453Z"
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-08-18T12:43:47.623Z"
 last_activity: 2026-08-18
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
 ---
 
 # Project State: LOF Fund Arbitrage Backtesting System
@@ -29,11 +29,11 @@ See: `.planning/PROJECT.md` (updated 2026-08-18)
 ## Current Position
 
 Phase: 04 (postprocess-pipeline-hardening) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-08-18 — Phase 04 execution started
 
-Progress: [█████░░░░░] 50% (0/7 phases across v1.0+v1.1; v1.0 Phases 1-2 complete, Phase 3 superseded by ad-hoc `postprocess.py` delivery, v1.1 Phases 4-7 not started)
+Progress: [████████░░] 75% (0/7 phases across v1.0+v1.1; v1.0 Phases 1-2 complete, Phase 3 superseded by ad-hoc `postprocess.py` delivery, v1.1 Phases 4-7 not started)
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: [█████░░░░░] 50% (0/7 phases across v1.0+v1.1; v1.
 |------|----------|-------|-------|
 | Phase 04 P01 | 20min | 2 tasks | 3 files |
 | Phase 04 P02 | ~25min | 2 tasks | 2 files |
+| Phase 04 P03 | ~20min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -71,6 +72,7 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase ?]: Task 2's 180-day boundary tests build dates from datetime.now() at test-run time so assertions do not rot
 - [Phase ?]: [Phase 04-02] KNOWN_RESTRICTION_TYPES allowlist mirrors the subscription_restrictions CHECK constraint; unknown non-empty types raise/flag, None/empty stays tolerated
 - [Phase ?]: [Phase 04-02] Task 2 (D-06 regression matrix) landed as test-only commit — all five scenarios passed against existing behavior, no production fix needed
+- [Phase ?]: [Phase 04-03] write_limit_events() rewritten to stage every row into limit_events_new inside one BEGIN IMMEDIATE transaction, swapping the live table in only after the last insert succeeds; failures roll back (removing staging residue) and re-raise
 
 ### Pending Todos
 
@@ -94,8 +96,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-18T12:38:04.437Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-08-18T12:43:47.612Z
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None
 
 **Next action:** `/gsd-plan-phase 4` (Postprocess Pipeline Hardening)
