@@ -177,6 +177,7 @@ class PostprocessDBTestCase(unittest.TestCase):
             cwd=str(PROJECT_ROOT),
             capture_output=True,
             env=env,
+            timeout=60,
         )
         result.stdout = result.stdout.decode("utf-8", errors="replace")
         result.stderr = result.stderr.decode("utf-8", errors="replace")
