@@ -39,8 +39,14 @@ Original phase plans and summaries are archived at `.planning/milestones/v1.0-ph
   1. `pytest tests/test_postprocess.py` exists, passes, and includes cases for holiday-resume-in-the-middle and missing-prior-suspend synthetic-interval scenarios — regression coverage for the exact bug fixed in commit `89830c8`
   2. `postprocess()` refuses to write `limit_events` (returns a clear error/non-zero exit rather than only printing) when `validate()` findings exceed a configurable threshold
   3. `write_limit_events()` writes to a staging table and swaps atomically, so a run that fails partway through leaves the previous `limit_events` table intact and queryable
-  4. The full existing test suite still passes — no behavior change on the happy path (bug fixes excepted)
-**Plans**: TBD
+  4. The full existing test suite still passes — no behavior change on the happy path (bug fixes excepted). Baseline recorded at planning time: 105 tests, 1 pre-existing failure (`test_open_ended_limits.TestOpenEndedLimits.test_overlapping_limits_last_one_wins`, loader/engine limit-application logic, out of scope per REQUIREMENTS). Criterion is read as "no new failures beyond that baseline".
+**Plans**: 4 plans
+
+Plans:
+- [ ] 04-01-PLAN.md — Tracer: validation gate blocks the write end-to-end (`validate()` returns findings, `postprocess()` refuses, CLI exits non-zero) + temp-DB test harness (STAB-02)
+- [ ] 04-02-PLAN.md — `89830c8` regression matrix, fail-loud on unknown `restriction_type`, inverted-interval clamp (STAB-01)
+- [ ] 04-03-PLAN.md — `write_limit_events()` staging table + single-transaction atomic swap (STAB-03)
+- [ ] 04-04-PLAN.md — D-08 real-database validation run, suite baseline, blocking triage decision (STAB-01/02/03)
 
 ### Phase 5: Dual-Provider LLM Client & Extraction Reliability
 
@@ -86,7 +92,7 @@ Phases 4, 5, and 6 have no hard interdependency and may be executed in any order
 | 1. Foundation | v1.0 | 4/4 | Complete | 2026-02-06 |
 | 2. PDF Processing | v1.0 | 3/3 | Complete | 2026-02-06 |
 | 3. Timeline Integration | v1.0 | — | Superseded by `postprocess.py` (shipped outside GSD process) | 2026-04 |
-| 4. Postprocess Pipeline Hardening | v1.1 | 0/? | Not started | - |
+| 4. Postprocess Pipeline Hardening | v1.1 | 0/4 | Planned | - |
 | 5. Dual-Provider LLM Client & Extraction Reliability | v1.1 | 0/? | Not started | - |
 | 6. Data Fetch Reliability (akshare NAV) | v1.1 | 0/? | Not started | - |
 | 7. Planning Docs & Hygiene Reconciliation | v1.1 | 0/? | Not started | - |
