@@ -20,7 +20,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.data.postprocess import ValidationBlockedError, validate
+from datetime import datetime, timedelta
+
+from src.data.postprocess import (
+    ValidationBlockedError,
+    build_limit_events,
+    postprocess,
+    validate,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -218,6 +225,147 @@ class TestValidationGate(PostprocessDBTestCase):
         self.assertIn("2022-01-14", combined)
         self.assertIn("2022-01-20", combined)
 
+        after = self._read_limit_events()
+        self.assertEqual(before, after)
+
+    def test_clean_run_writes_limit_events_and_replaces_sentinel(self):
+        """Pass-side counterpart of the tracer: no validation findings ->
+        CLI exits 0, limit_events is populated from the seeded records, and
+        the previous sentinel row is replaced (not merged with)."""
+        sentinel_rows = [
+            {
+                "ticker": "999999",
+                "start_date": "2020-01-01",
+                "end_date": "2020-01-05",
+                "max_amount": 0.0,
+                "reason": "sentinel-1",
+                "source_announcement_ids": "[]",
+            }
+        ]
+        self._seed_limit_events(sentinel_rows)
+
+        self._seed_subscription_restrictions([
+            {
+                "fund_code": "160105",
+                "announcement_date": "2022-01-10",
+                "effective_date": "2022-01-14",
+                "action": "restrict",
+                "restriction_type": "amount_limit",
+                "limit_amount": 1000000,
+                "source_file": "a.pdf",
+            },
+            {
+                "fund_code": "160105",
+                "announcement_date": "2022-01-18",
+                "effective_date": "2022-01-19",
+                "action": "resume",
+                "restriction_type": "amount_limit",
+                "source_file": "b.pdf",
+            },
+        ])
+
+        result = self._run_cli(
+            "--postprocess-only", "--data-dir", str(self.data_dir)
+        )
+
+        self.assertEqual(result.returncode, 0)
+
+        rows = self._read_limit_events()
+        fund_rows = [r for r in rows if r[1] == "160105"]
+        self.assertEqual(len(fund_rows), 1)
+        _, ticker, start_date, end_date, max_amount, _reason, _src, _open = fund_rows[0]
+        self.assertEqual(ticker, "160105")
+        self.assertEqual(start_date, "2022-01-14")
+        self.assertEqual(end_date, "2022-01-18")
+        self.assertEqual(max_amount, 1000000)
+
+        # The sentinel row is gone, replaced by the fresh build.
+        self.assertNotIn("sentinel-1", [r[5] for r in rows])
+
+
+class TestValidationBoundaries(PostprocessDBTestCase):
+    """Pins the exact 180-day staleness boundary in validate(), called
+    directly against in-memory record dicts built from datetime.now() so
+    the tests do not rot."""
+
+    @staticmethod
+    def _open_suspend_record(fund_code, days_ago):
+        now = datetime.now()
+        eff = now - timedelta(days=days_ago)
+        # announcement_date one day before effective_date so the
+        # date-ordering rule never fires here -- only the staleness rule
+        # is under test.
+        ann = eff - timedelta(days=1)
+        return {
+            "fund_code": fund_code,
+            "announcement_date": ann.strftime("%Y-%m-%d"),
+            "effective_date": eff.strftime("%Y-%m-%d"),
+            "action": "suspend",
+            "restriction_type": "full_suspension",
+            "source_file": f"boundary_{days_ago}.pdf",
+        }
+
+    def test_exactly_180_days_yields_no_issue(self):
+        record = self._open_suspend_record("TEST180", 180)
+        self.assertLessEqual(
+            record["announcement_date"], record["effective_date"]
+        )
+        issues = validate([record])
+        self.assertEqual(issues, [])
+
+    def test_181_days_yields_exactly_one_issue_naming_the_fund(self):
+        record = self._open_suspend_record("TEST181", 181)
+        self.assertLessEqual(
+            record["announcement_date"], record["effective_date"]
+        )
+        issues = validate([record])
+        self.assertEqual(len(issues), 1)
+        self.assertIn("TEST181", issues[0])
+
+    # Note on the 180-day-and-23-hours case named in the plan: validate()
+    # parses effective_date with the date-only format "%Y-%m-%d", so a
+    # record cannot carry a sub-day component through that field -- any
+    # record built at "180 days" old is, at parse time, exactly midnight
+    # of that date. The underlying comparison is
+    # `(datetime.now() - eff).days > 180`, and `timedelta.days` truncates
+    # toward zero rather than rounding. The two tests above already pin
+    # this contract directly: the 180-day-old record (whose wall-clock age
+    # is 180 days plus a few hours, because `eff` loses the time-of-day it
+    # was constructed with once round-tripped through the date-only
+    # format) still yields 0 issues, while a record aged one whole day
+    # further yields 1 -- i.e. elapsed time strictly greater than 180
+    # *whole* days is required to cross the threshold, matching the
+    # truncating (not rounding) semantics of `.days`.
+
+
+class TestEmptyInput(PostprocessDBTestCase):
+    """Empty-input shapes: build_limit_events([]), validate([]), and
+    postprocess() against a database with zero subscription_restrictions
+    rows must not raise and must not silently wipe a downstream table."""
+
+    def test_build_limit_events_empty_list(self):
+        self.assertEqual(build_limit_events([]), [])
+
+    def test_validate_empty_list(self):
+        self.assertEqual(validate([]), [])
+
+    def test_postprocess_empty_subscription_restrictions_leaves_limit_events(self):
+        sentinel_rows = [
+            {
+                "ticker": "999999",
+                "start_date": "2020-01-01",
+                "end_date": "2020-01-05",
+                "max_amount": 0.0,
+                "reason": "sentinel-1",
+                "source_announcement_ids": "[]",
+            }
+        ]
+        self._seed_limit_events(sentinel_rows)
+        before = self._read_limit_events()
+
+        stats = postprocess(self.db_path)
+
+        self.assertEqual(stats["intervals"], 0)
         after = self._read_limit_events()
         self.assertEqual(before, after)
 
