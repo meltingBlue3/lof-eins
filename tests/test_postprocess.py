@@ -418,6 +418,32 @@ class TestValidateHolidayResumeStaleness(PostprocessDBTestCase):
         )
 
 
+class TestMalformedEffectiveDateFlagged(PostprocessDBTestCase):
+    """WR-03 regression: an unparseable effective_date on an open
+    restriction must be surfaced as its own validation issue, not silently
+    swallowed (which would disable the staleness check for that record)."""
+
+    def test_unparseable_effective_date_on_open_restriction_is_flagged(self):
+        records = [
+            {
+                "fund_code": "160105",
+                "announcement_date": "2022-01-01",
+                "effective_date": "not-a-date",
+                "action": "restrict",
+                "restriction_type": "amount_limit",
+                "source_file": "a.pdf",
+            }
+        ]
+        issues = validate(records)
+        self.assertTrue(
+            any(
+                "160105" in i and "not-a-date" in i and "无法解析" in i
+                for i in issues
+            ),
+            f"expected a malformed-effective_date finding, got: {issues}",
+        )
+
+
 class TestPostprocessRawStat(PostprocessDBTestCase):
     """WR-02 regression: stats["raw"] must reflect the pre-dedup record
     count, not the post-dedup count records is reassigned to."""

@@ -455,13 +455,20 @@ def validate(records: List[dict]) -> List[str]:
         for r in open_restrictions:
             try:
                 eff = datetime.strptime(r["effective_date"], "%Y-%m-%d")
-                if (datetime.now() - eff).days > 180:
-                    issues.append(
-                        f"  {fund} {r['effective_date']} {r['action']} "
-                        f"{r.get('restriction_type')} 无对应resume（超180天）"
-                    )
             except ValueError:
-                pass
+                # WR-03: a malformed effective_date must be surfaced as its
+                # own issue, not silently disable the staleness check for
+                # this record.
+                issues.append(
+                    f"  {fund} {r['effective_date']} {r['action']} "
+                    f"{r.get('restriction_type')} effective_date 格式无法解析"
+                )
+                continue
+            if (datetime.now() - eff).days > 180:
+                issues.append(
+                    f"  {fund} {r['effective_date']} {r['action']} "
+                    f"{r.get('restriction_type')} 无对应resume（超180天）"
+                )
 
         # Check: effective_date should not be before announcement_date
         for r in fund_records:
