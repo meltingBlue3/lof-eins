@@ -1,209 +1,195 @@
 # Codebase Structure
 
-**Analysis Date:** 2025-02-06
+**Analysis Date:** 2026-08-18
 
 ## Directory Layout
 
 ```
 lof-eins/
-├── src/                          # Main source package
-│   ├── __init__.py               # Package exports
-│   ├── config.py                 # BacktestConfig (central config)
-│   ├── data/                     # Data layer
-│   │   ├── __init__.py
-│   │   ├── loader.py             # DataLoader (unified data access)
-│   │   ├── downloader.py         # RealDataDownloader (JoinQuant)
-│   │   ├── announcement_downloader.py  # Fund announcement scraper
-│   │   └── generator/            # Mock data generator
-│   │       ├── __init__.py
-│   │       ├── config.py         # MockConfig
-│   │       ├── generators.py     # Data generation logic
-│   │       └── main.py           # Generator entry point
-│   ├── strategy/                 # Strategy layer
-│   │   ├── __init__.py
-│   │   ├── base.py               # BaseStrategy (ABC), Signal
-│   │   └── simple_lof.py         # SimpleLOFStrategy (implementation)
-│   └── engine/                   # Backtest engine
-│       ├── __init__.py
-│       ├── account.py            # Account (T+2 settlement)
-│       └── backtest.py           # BacktestEngine, BacktestResult
-├── configs/                      # YAML configuration files
-│   ├── backtest.yaml             # Backtest parameters
-│   └── mock.yaml                 # Mock data generation parameters
-├── scripts/                      # Executable scripts
-│   ├── download_lof.py           # Download real data from JoinQuant
-│   ├── download_announcements.py # Download fund announcements
-│   ├── generate_mock.py          # Generate mock test data
-│   └── inspect_data.py           # Visualize data with Plotly
-├── tests/                        # Test files
-│   └── test_loader.py            # DataLoader unit tests
-├── data/                         # Data directory (gitignored)
-│   ├── mock/                     # Generated mock data
-│   │   ├── market/               # OHLCV Parquet files
-│   │   ├── nav/                  # NAV Parquet files
-│   │   └── config/               # fees.csv, fund_status.db
-│   └── real_all_lof/             # Downloaded real data (same structure)
-├── run_backtest.py               # Main backtest entry point
-├── requirements.txt              # Python dependencies
-├── .env.example                  # Environment template
-└── README.md                     # Documentation
+├── src/                                # Main source package
+│   ├── __init__.py                     # Public API re-exports (BacktestConfig, DataLoader, engine, strategy)
+│   ├── config.py                       # BacktestConfig dataclass (YAML load/save)
+│   ├── data/                           # Data acquisition, storage access, announcement pipeline
+│   │   ├── loader.py                   # DataLoader — merges market/nav/limit_events into one DataFrame
+│   │   ├── downloader.py               # RealDataDownloader — JoinQuant market data + akshare NAV
+│   │   ├── announcement_downloader.py  # Downloads announcement PDFs from Eastmoney
+│   │   ├── pdf_extractor.py            # Standalone pdfplumber text extraction helper
+│   │   ├── llm_client.py               # LLMClient — async Kimi K2.5 PDF upload + structured extraction
+│   │   ├── announcement_processor.py   # AnnouncementProcessor — async concurrent batch orchestration
+│   │   ├── postprocess.py              # subscription_restrictions → limit_events postprocessing
+│   │   └── generator/                  # Synthetic/mock data generator
+│   │       ├── config.py               # MockConfig dataclass
+│   │       ├── generators.py           # Mock market/nav/limit generation functions
+│   │       └── main.py                 # generate_mock_data() entry function
+│   ├── strategy/                       # Trading strategy layer
+│   │   ├── base.py                     # BaseStrategy (ABC), Signal dataclass
+│   │   └── simple_lof.py               # SimpleLOFStrategy implementation
+│   └── engine/                         # Backtest execution engine
+│       ├── account.py                  # Account, PendingSettlement (T+2 settlement)
+│       └── backtest.py                 # BacktestEngine, BacktestResult, fee calc
+├── scripts/                            # Executable CLI entry points (thin argparse wrappers over src/)
+│   ├── download_lof.py                 # Download market/NAV data (JoinQuant + akshare)
+│   ├── download_announcements.py       # Download announcement PDFs (Eastmoney)
+│   ├── parse_announcements.py          # Parse PDFs (Kimi K2.5) + postprocess → limit_events
+│   ├── generate_mock.py                # Generate mock dataset
+│   └── inspect_data.py                 # Visualize/inspect data quality (plotly)
+├── app/                                # Streamlit dashboard
+│   ├── app.py                          # Landing page / workflow overview
+│   ├── utils.py                        # Shared UI helper functions
+│   └── pages/
+│       ├── 1_data_explorer.py          # Market/NAV/premium visualization
+│       ├── 2_backtest.py               # Backtest configuration + run UI
+│       └── 3_backtest_results.py       # Results viewer
+├── prompts/
+│   └── system_prompt.md                # LLM system prompt template for announcement extraction
+├── configs/                            # YAML configuration files
+│   ├── backtest.yaml                   # Default backtest parameters
+│   └── mock.yaml                       # Default mock-data generation parameters
+├── tests/                              # Unit/integration tests (pytest/unittest)
+│   ├── test_loader.py
+│   ├── test_open_ended_limits.py
+│   ├── test_database_schema.py
+│   ├── test_pdf_extractor.py
+│   ├── test_llm_client.py
+│   ├── test_announcement_processor.py
+│   └── test_architecture_fixes.py
+├── data/                               # Data root (gitignored, populated by scripts)
+│   ├── mock/                           # Synthetic dataset (market/, nav/, config/)
+│   └── real_all_lof/                   # Real downloaded dataset
+│       ├── market/                     # {ticker}.parquet OHLCV
+│       ├── nav/                        # {ticker}.parquet NAV series
+│       ├── config/                     # fees.csv, fund_status.db (SQLite)
+│       └── announcements/{ticker}/     # {date}_{title}.pdf announcement files
+├── output/                             # Backtest run exports (timestamped dirs, gitignored)
+├── docs/                               # Design docs (detailed-design.md, requirements.md)
+├── .planning/                          # GSD planning artifacts (phases, quick tasks, roadmap)
+├── run_backtest.py                     # Backtest CLI entry point
+├── requirements.txt
+├── README.md                           # NOTE: describes stale Ollama-based pipeline (see below)
+└── TECHNICAL_PROPOSAL.md               # Original technical proposal (also predates Kimi/akshare rewrite)
 ```
 
 ## Directory Purposes
 
-### `src/`
-- Purpose: Main Python package
-- Contains: All source code organized by layer
-- Key files: `__init__.py` (exports main classes)
+**`src/data/`:**
+- Purpose: Everything related to acquiring, storing, and transforming fund data — market/NAV downloads and the announcement→limit_events pipeline.
+- Contains: Downloaders, LLM client, batch processor, postprocessing logic, DataLoader.
+- Key files: `loader.py` (read path used by engine), `llm_client.py` + `announcement_processor.py` + `postprocess.py` (announcement pipeline, rewritten April 2026).
 
-### `src/data/`
-- Purpose: Data loading, downloading, and generation
-- Contains: DataLoader, downloaders, generator subpackage
-- Key files: `loader.py` (core data access)
+**`src/data/generator/`:**
+- Purpose: Produce synthetic datasets for testing without external API credentials.
+- Contains: `MockConfig`, generation functions for market/nav/limit series, `generate_mock_data()` orchestrator.
 
-### `src/data/generator/`
-- Purpose: Mock data generation
-- Contains: Config, generators, entry point
-- Key files: `generators.py` (GBM simulation, limit event generation)
+**`src/strategy/`:**
+- Purpose: Pluggable trading decision logic, decoupled from execution mechanics.
+- Contains: Abstract interface (`BaseStrategy`) and one concrete implementation (`SimpleLOFStrategy`).
 
-### `src/strategy/`
-- Purpose: Trading strategy implementations
-- Contains: Base class and concrete strategies
-- Key files: `base.py` (abstract interface), `simple_lof.py` (example implementation)
+**`src/engine/`:**
+- Purpose: Simulate trade execution, cash/position accounting, and settlement timing.
+- Contains: `Account` (T+2 ledger), `BacktestEngine`/`BacktestResult` (simulation loop, metrics).
 
-### `src/engine/`
-- Purpose: Backtest execution engine
-- Contains: Account management, backtest orchestration, results
-- Key files: `backtest.py` (main engine), `account.py` (T+2 settlement)
+**`scripts/`:**
+- Purpose: User-facing CLI entry points; each wraps a `src/` component with argparse and `.env` loading.
+- Generated: No. Committed: Yes.
 
-### `configs/`
-- Purpose: YAML configuration files
-- Contains: Parameter files for backtest and data generation
-- Key files: `backtest.yaml`, `mock.yaml`
+**`app/`:**
+- Purpose: Streamlit multi-page dashboard mirroring the CLI workflow (explore data → configure backtest → view results).
+- Contains: `app.py` (home), `pages/*.py` (Streamlit auto-routed pages), `utils.py` (shared formatting/plot helpers).
 
-### `scripts/`
-- Purpose: Executable utilities
-- Contains: CLI tools for data operations
-- Key files: `download_lof.py`, `generate_mock.py`, `inspect_data.py`
+**`prompts/`:**
+- Purpose: External prompt template(s) for the LLM extraction step, kept separate from code for easy iteration.
+- Key file: `system_prompt.md`, loaded by `src/data/llm_client.py` via `_load_prompt()`.
 
-### `data/`
-- Purpose: Data storage (not committed)
-- Contains: Market data, NAV data, configuration, limit events
-- Structure: `market/`, `nav/`, `config/` subdirectories
+**`configs/`:**
+- Purpose: Default YAML parameter sets consumed by `BacktestConfig.from_yaml()` / mock generator.
+- Generated: No. Committed: Yes.
 
-### `tests/`
-- Purpose: Unit tests
-- Contains: Test files
-- Key files: `test_loader.py`
+**`data/`:**
+- Purpose: All downloaded/generated datasets (market, NAV, announcements, SQLite state).
+- Generated: Yes (by `scripts/download_lof.py`, `scripts/download_announcements.py`, `scripts/parse_announcements.py`, `scripts/generate_mock.py`).
+- Committed: No (gitignored; large per-ticker fixture data present locally under `data/real_all_lof/announcements/{ticker}/`).
+
+**`output/`:**
+- Purpose: Timestamped backtest run exports (CSV daily perf / trade logs, console report).
+- Generated: Yes (by `run_backtest.py`). Committed: No.
+
+**`tests/`:**
+- Purpose: Unit and integration tests for loader, engine constraints, PDF extraction, LLM client (mocked), announcement processor, DB schema.
+- Note: `test_llm_client.py` and `test_announcement_processor.py` test the current Kimi/async implementation, not the legacy Ollama client.
 
 ## Key File Locations
 
-### Entry Points
-- `run_backtest.py`: Main backtest runner (CLI)
-- `scripts/generate_mock.py`: Mock data generator (CLI)
-- `scripts/download_lof.py`: Real data downloader (CLI)
-- `src/data/generator/main.py`: Generator programmatic entry
+**Entry Points:**
+- `run_backtest.py`: Backtest CLI runner.
+- `scripts/download_lof.py`: Market/NAV data downloader.
+- `scripts/download_announcements.py`: Announcement PDF downloader.
+- `scripts/parse_announcements.py`: LLM extraction + postprocessing runner.
+- `scripts/generate_mock.py`: Mock dataset generator.
+- `app/app.py`: Streamlit dashboard entry (`streamlit run app/app.py`).
 
-### Configuration
-- `src/config.py`: `BacktestConfig` class
-- `src/data/generator/config.py`: `MockConfig` class
-- `configs/backtest.yaml`: Runtime backtest parameters
-- `configs/mock.yaml`: Mock generation parameters
-- `.env.example`: Environment variable template (JoinQuant credentials)
+**Configuration:**
+- `configs/backtest.yaml`, `configs/mock.yaml`: Runtime parameters.
+- `.env` / `.env.example`: Secrets — `JQ_USERNAME`, `JQ_PASSWORD`, `KIMI_API_KEY` (existence only; contents never inspected here).
+- `src/config.py`: `BacktestConfig` dataclass definition and YAML (de)serialization.
 
-### Core Logic
-- `src/engine/backtest.py`: `BacktestEngine` (586 lines)
-- `src/engine/account.py`: `Account` with T+2 settlement (292 lines)
-- `src/data/loader.py`: `DataLoader` (246 lines)
-- `src/strategy/base.py`: `BaseStrategy` ABC, `Signal` dataclass
+**Core Logic:**
+- `src/data/loader.py`: Data merge/alignment.
+- `src/data/llm_client.py`, `src/data/announcement_processor.py`, `src/data/postprocess.py`: Announcement → limit_events pipeline (current implementation, post-rewrite).
+- `src/engine/backtest.py`, `src/engine/account.py`: Simulation core.
+- `src/strategy/simple_lof.py`: Default strategy logic.
 
-### Data Files (Generated)
-- `data/{source}/market/{ticker}.parquet`: OHLCV market data
-- `data/{source}/nav/{ticker}.parquet`: NAV data
-- `data/{source}/config/fees.csv`: Tiered fee configuration
-- `data/{source}/config/fund_status.db`: Limit events (SQLite)
+**Testing:**
+- `tests/*.py`: Mirrors `src/` modules by concern (loader, schema, pdf extraction, LLM client, processor, open-ended limits, architecture fixes).
 
 ## Naming Conventions
 
-### Files
-- Python modules: `snake_case.py` (e.g., `simple_lof.py`, `backtest.py`)
-- Configuration: `lowercase.yaml` (e.g., `backtest.yaml`)
-- Scripts: `snake_case.py` with action prefix (e.g., `download_lof.py`, `generate_mock.py`)
+**Files:**
+- Snake_case module names matching primary class/function, e.g. `announcement_processor.py` defines `AnnouncementProcessor`.
+- Test files: `test_<module_under_test>.py`, mirroring `src/` filenames.
+- Downloaded PDFs: `{date:YYYY-MM-DD}_{title}.pdf` under `data/{dataset}/announcements/{ticker}/`.
 
-### Directories
-- Source directories: `lowercase/` (e.g., `src/`, `data/`, `strategy/`)
-- Generated data: `{source}_{descriptor}/` (e.g., `real_all_lof/`, `mock/`)
-
-### Classes
-- Config classes: `{Name}Config` (e.g., `BacktestConfig`, `MockConfig`)
-- Strategy classes: `{Name}Strategy` (e.g., `SimpleLOFStrategy`)
-- Engine classes: `{Name}Engine` (e.g., `BacktestEngine`)
-- Result classes: `{Name}Result` (e.g., `BacktestResult`)
-- Account classes: `{Name}` (e.g., `Account`, `PendingSettlement`)
-
-### Functions/Methods
-- Public methods: `snake_case` (e.g., `run()`, `load_bundle()`, `generate_signals()`)
-- Private methods: `_snake_case` with underscore prefix (e.g., `_execute_buy()`, `_calculate_t2_date()`)
+**Directories:**
+- `src/{domain}/` groups by architectural layer (`data`, `strategy`, `engine`), not by feature.
+- `data/{dataset_name}/{market,nav,config,announcements}/` — fixed subdirectory contract enforced by `DataLoader.__init__` (raises `FileNotFoundError` if `market`, `nav`, or `config` is missing).
+- `output/{YYYYMMDD_HHMMSS}/` — one directory per backtest run.
 
 ## Where to Add New Code
 
-### New Strategy
-- Implementation: `src/strategy/{name}.py`
-- Inherit from: `BaseStrategy`
-- Implement: `generate_signals(row, positions, config) -> List[Signal]`
-- Export from: `src/__init__.py` (optional)
+**New announcement-pipeline stage/feature:**
+- Implementation: `src/data/` (new module) or extend `postprocess.py` / `announcement_processor.py`.
+- Prompt changes: `prompts/system_prompt.md`.
+- Tests: `tests/test_announcement_processor.py` or a new `tests/test_<feature>.py`.
 
-### New Data Source
-- Downloader: `src/data/{name}_downloader.py`
-- Follow pattern: `RealDataDownloader` in `downloader.py`
-- Implement: `authenticate()`, `download_tickers()` methods
+**New trading strategy:**
+- Implementation: `src/strategy/<name>.py`, subclassing `BaseStrategy` from `src/strategy/base.py`.
+- Register/use: pass instance to `BacktestEngine(strategy=...)` in `run_backtest.py` or a new script.
 
-### New Configuration Parameter
-- Backtest config: Add field to `src/config.py` `BacktestConfig`
-- Mock config: Add field to `src/data/generator/config.py` `MockConfig`
-- Add validation in `__post_init__`
+**New data source (market/NAV):**
+- Implementation: extend `src/data/downloader.py` (`RealDataDownloader`) or add a sibling downloader module following its output contract (`market/{ticker}.parquet`, `nav/{ticker}.parquet`, `config/fees.csv`, `config/fund_status.db`).
 
-### New Engine Feature
-- Core engine: Extend `src/engine/backtest.py` `BacktestEngine`
-- Account feature: Extend `src/engine/account.py` `Account`
-- Result metric: Add `@cached_property` to `src/engine/backtest.py` `BacktestResult`
+**New Streamlit page:**
+- Implementation: `app/pages/N_<name>.py` (Streamlit auto-numbers/orders by filename prefix); shared helpers in `app/utils.py`.
 
-### New Script
-- Location: `scripts/{action}_{target}.py`
-- Pattern: CLI with argparse, load config, execute operation
-- Example: Follow `download_lof.py` or `generate_mock.py`
-
-### Utilities/Helpers
-- Shared helpers: Add to appropriate module or create new module in `src/`
-- Data utilities: `src/data/` or `src/data/generator/`
-- Math utilities: Consider `src/utils.py` (doesn't exist yet)
+**Utilities:**
+- Shared backtest/engine helpers: colocate in `src/engine/backtest.py` (e.g., `calculate_subscription_fee`) unless broadly reusable, then add a `src/utils.py`-style module (none currently exists — introduce only if reuse spans layers).
 
 ## Special Directories
 
-### `.venv/`
-- Purpose: Python virtual environment
-- Generated: Yes (by user)
-- Committed: No (gitignored)
+**`data/`:**
+- Purpose: Runtime data root for both mock and real datasets.
+- Generated: Yes. Committed: No (gitignored).
 
-### `data/`
-- Purpose: All data files (mock and real)
-- Generated: Yes (by scripts)
-- Committed: No (gitignored)
-- Structure:
-  - `market/`: Parquet files named `{ticker}.parquet`
-  - `nav/`: Parquet files named `{ticker}.parquet`
-  - `config/`: `fees.csv`, `fund_status.db`
+**`output/`:**
+- Purpose: Backtest result exports, one timestamped subdirectory per run.
+- Generated: Yes. Committed: No.
 
-### `.cursor/`
-- Purpose: Cursor IDE plans
-- Generated: Yes
-- Committed: No (typically)
+**`.planning/`:**
+- Purpose: GSD workflow state — phases, quick-task logs, roadmap, requirements. Not application code.
+- Generated: Partially (by GSD tooling). Committed: Yes.
 
-### `.planning/`
-- Purpose: GSD planning documents
-- Generated: Yes
-- Committed: Yes
+**`.idea/`, `.venv/`, `.pytest_cache/`, `.ruff_cache/`:**
+- Purpose: IDE/tooling artifacts. Generated: Yes. Committed: No.
 
 ---
 
-*Structure analysis: 2025-02-06*
+*Structure analysis: 2026-08-18*

@@ -1,203 +1,125 @@
 # Coding Conventions
 
-**Analysis Date:** 2025-02-06
+**Analysis Date:** 2026-08-18
 
 ## Naming Patterns
 
 **Files:**
-- **Modules:** `snake_case.py` - e.g., `simple_lof.py`, `announcement_downloader.py`
-- **Classes:** `PascalCase` - e.g., `DataLoader`, `BacktestEngine`, `SimpleLOFStrategy`
-- **Methods:** `snake_case` - e.g., `generate_signals`, `calculate_subscription_fee`
-- **Variables:** `snake_case` - e.g., `premium_rate`, `daily_limit`, `max_amount`
-- **Private:** Prefix with underscore for internal use - e.g., `_fees_cache`, `_current_date`
+- Snake_case module names: `src/data/llm_client.py`, `src/data/announcement_processor.py`, `src/data/postprocess.py`
+- One primary class/concept per file, file name matches the concept (e.g. `LLMClient` lives in `llm_client.py`)
+- Scripts under `scripts/` are verb-first CLI entry points: `scripts/download_announcements.py`, `scripts/parse_announcements.py`, `scripts/generate_mock.py`
+- Test files mirror the module under test with a `test_` prefix: `tests/test_llm_client.py` tests `src/data/llm_client.py`; some tests are organized by concern rather than 1:1 module (`tests/test_architecture_fixes.py`, `tests/test_database_schema.py`, `tests/test_open_ended_limits.py`)
 
-**Constants:**
-- **Module-level:** `UPPER_SNAKE_CASE` - e.g., `DEFAULT_FEES`, `DEFAULT_CONFIG_PATH`
-- **Class-level:** `UPPER_SNAKE_CASE` - e.g., `DataLoader.DEFAULT_FEES`
+**Functions:**
+- snake_case throughout: `load_records`, `dedup_records`, `build_limit_events`, `_parse_response`
+- Leading underscore for internal/private helpers: `_build_system_prompt`, `_process_and_save`, `_is_holiday_resume`, `_load_prompt`
+- Async functions use standard verb names with no special suffix (no `_async` suffix): `async def extract_from_pdf`, `async def upload_pdf`, `async def get_file_content`
 
-**Type Hints:**
-- Mandatory for all function signatures
-- Use `typing` imports: `Optional`, `Dict`, `List`, `Union`, `Literal`
-- Return type `None` explicitly for void functions
-- Use `->` syntax consistently
+**Variables:**
+- snake_case: `pdf_path`, `db_path`, `fund_records`, `by_fund`
+- Short accumulator names in loops (`r`, `rec`, `nxt`) are common in `src/data/postprocess.py` — acceptable for tight, well-scoped loops but avoid in longer functions
+
+**Types/Classes:**
+- PascalCase: `LLMClient`, `AnnouncementProcessor`, `ProgressTracker`, `DataLoader`, `BacktestConfig`
+- Dataclasses used for structured config/state objects (see `src/strategy/base.py`, `src/engine/account.py`) via `@dataclass`
 
 ## Code Style
 
-**Docstrings:**
-- **Style:** Google/NumPy docstring format
-- **Location:** Triple-quoted docstring at module, class, and method level
-- **Structure:** Brief summary, detailed description, Args, Returns, Raises sections
-
-```python
-def load_bundle(
-    self,
-    ticker: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None
-) -> pd.DataFrame:
-    """Load and merge all data for a single ticker.
-    
-    Args:
-        ticker: Fund ticker symbol (e.g., '161005').
-        start_date: Optional start date filter (format: 'YYYY-MM-DD').
-        end_date: Optional end date filter (format: 'YYYY-MM-DD').
-        
-    Returns:
-        DataFrame indexed by date with columns: open, high, low, close, volume, nav, premium_rate, daily_limit
-        
-    Raises:
-        FileNotFoundError: If market or NAV data files don't exist.
-    """
-```
-
 **Formatting:**
-- **Tool:** Not explicitly configured (no .pylintrc, setup.cfg, or pyproject.toml found)
-- **Indentation:** 4 spaces
-- **Line length:** Appears to follow ~100 character limit
-- **Imports:** Standard library first, third-party second, local imports last
+- No formatter config detected (no `.prettierrc`/`black`/`ruff` config files found in repo root). Code is manually kept close to PEP 8: 4-space indent, double-quoted strings predominant, trailing commas in multi-line calls.
+- No `.flake8`, `pyproject.toml` lint section, or `setup.cfg` present — treat existing file style as the de facto standard when adding code.
+
+**Linting:**
+- No linter configured. Follow existing patterns exactly (import grouping, docstring style, print-based status output) rather than introducing new tooling opinions.
+
+**Type hints:**
+- Consistent use of `typing` (`Optional`, `List`, `Dict`, `Any`) plus modern `X | Y` union syntax in newer modules (`src/data/postprocess.py`: `db_path: str | Path`, `src/data/announcement_processor.py`: `db_path: Path | str`)
+- Function signatures are fully typed for public methods; return types included (`-> List[Dict[str, Any]]`, `-> dict`)
 
 ## Import Organization
 
-**Order:**
-1. **Standard library** - `import sys`, `import sqlite3`, `from pathlib import Path`
-2. **Third-party** - `import pandas as pd`, `import numpy as np`, `import yaml`
-3. **Local modules** - `from src.config import BacktestConfig`
-
-**Pattern:**
-```python
-# Standard library
-import logging
-from dataclasses import dataclass
-from datetime import date
-
-# Third-party
-import numpy as np
-import pandas as pd
-
-# Local imports
-from src.config import BacktestConfig
-from src.data.loader import DataLoader
-```
+**Order (observed convention):**
+1. stdlib (`json`, `logging`, `os`, `re`, `sqlite3`, `asyncio`, `pathlib.Path`)
+2. third-party (`httpx`, `pandas as pd`, `openai.AsyncOpenAI`)
+3. local/relative imports (`from .llm_client import LLMClient`, `from src.config import BacktestConfig`)
 
 **Path Aliases:**
-- `pandas` → `pd`
-- `numpy` → `np`
+- None configured. Local imports use either package-relative (`from .llm_client import LLMClient` inside `src/data/`) or absolute-from-root (`from src.config import BacktestConfig`, `from src.data.loader import DataLoader`) — absolute form is used from `app/`, `scripts/`, and `tests/`.
+- Tests manually add project root to `sys.path` before importing local modules, since there is no installed package / `pyproject.toml` entry point:
+```python
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from src.data.llm_client import LLMClient
+```
 
 ## Error Handling
 
 **Patterns:**
-- **Validation:** Use `__post_init__` in dataclasses for parameter validation
-- **Exceptions:** Raise specific exceptions (`FileNotFoundError`, `ValueError`)
-- **Graceful degradation:** Log warnings and return empty/defaults on recoverable errors
-
+- Prefer specific exceptions where the failure mode is known, falling back to broad `except Exception` at integration boundaries (external APIs, file I/O) so a single bad record/file doesn't abort a batch job:
 ```python
-def __post_init__(self) -> None:
-    """Validate configuration parameters."""
-    if self.initial_cash <= 0:
-        raise ValueError(f"initial_cash must be positive, got {self.initial_cash}")
-```
-
-**Error Messages:**
-- Use descriptive messages with actual values
-- Use f-strings for formatting
-
-## Logging
-
-**Framework:** Python standard `logging` module
-
-**Patterns:**
-- Get logger per module: `logger = logging.getLogger(__name__)`
-- Levels: `INFO` for operations, `DEBUG` for detailed flow, `WARNING` for recoverable issues
-- Format: `%(asctime)s - %(levelname)s - %(message)s`
-
-```python
-logger.info(
-    "SELL %s: %.2f shares @ %.4f = %.2f (comm: %.2f)",
-    ticker, shares, price, net_proceeds, commission
-)
-```
-
-## Type Hints
-
-**Conventions:**
-- All public methods have complete type annotations
-- Use `Optional[X]` for nullable types
-- Use `Union[X, Y]` (or `X | Y` in Python 3.10+) for multiple types
-- Use `Literal` for string literals: `Literal['fixed', 'infinite']`
-- Use `...` for overload signatures (if needed)
-
-```python
-def resolve_tickers(
-    tickers_config: Union[str, List[str], None],
-    data_loader: DataLoader
-) -> List[str]:
+# src/data/pdf_extractor.py
+except pdfplumber.exceptions.PDFException as e:
+    ...
+except PermissionError as e:
+    ...
+except Exception as e:
     ...
 ```
+- Async batch processing swallows and records per-item errors instead of raising (`src/data/announcement_processor.py::_process_one`) — failures go through `tracker.mark_failed(rel_path, str(e)[:120])`, truncated to 120 chars, so one bad PDF does not kill the whole run.
+- `LLMClient.delete_file` intentionally suppresses all exceptions on cleanup (`except Exception: pass`) since file deletion failure is non-critical.
+- Config/init validation raises `ValueError` early with an actionable message (`src/data/llm_client.py::__init__` raises if `KIMI_API_KEY` is missing).
+- `try/finally` used to guarantee cleanup of uploaded remote resources regardless of success/failure (`LLMClient.extract_from_pdf` deletes the uploaded file in a `finally` block).
 
-## Dataclasses
+## Logging vs. Print
 
-**Pattern:** Use `@dataclass` for configuration and data containers
-
+**Two parallel channels exist — match the one used by the module you're editing:**
+- `logging` module (`logger = logging.getLogger(__name__)`) is declared in library-style modules (`src/data/llm_client.py`, `src/data/announcement_processor.py`) but is minimally used; most operational status is via `print()`.
+- `print()` is the dominant status/progress channel for scripts and pipeline modules (`src/data/postprocess.py`, `src/data/announcement_processor.py`, `src/data/downloader.py`) — including bilingual (Chinese) progress messages and `[OK]`/`[WARN]`/[ERROR]` tags:
 ```python
-@dataclass
-class Signal:
-    """Trading signal generated by a strategy."""
-    
-    action: Literal['buy', 'sell']
-    ticker: str
-    amount: float
+print(f"[OK] JoinQuant login successful | Quota: {count['spare']}/{count['total']}")
+print(f"    [WARN] Market data batch error: {e}")
 ```
+- When adding new pipeline/CLI code, follow the `print()` + bracket-tag convention (`[OK]`, `[WARN]`, `[ERROR]`) already established in `src/data/downloader.py`. Reserve `logging` for library code that may be imported without wanting stdout noise (current usage is sparse, so this is aspirational rather than fully enforced).
 
-**Validation:**
-- Implement `__post_init__` for parameter validation
-- Use `field(default_factory=list)` for mutable defaults
-- Use `field(default=..., repr=False)` for internal fields
+## Comments
+
+**Bilingual documentation is standard in newer/data-pipeline modules:**
+- Many docstrings and inline comments are given in English followed by a Chinese translation on the next line, e.g.:
+```python
+def _get_nav_data(self, codes, start_date, end_date) -> pd.DataFrame:
+    """Fetch NAV data for a batch of codes via akshare.
+    通过 akshare 获取一批代码的净值数据。
+    """
+```
+- This pattern appears throughout `src/data/downloader.py` and `tests/test_open_ended_limits.py`. Older modules (`src/data/llm_client.py`, `src/data/postprocess.py`, `src/data/announcement_processor.py`) are English-only in docstrings, with occasional inline Chinese literals for user-facing print output (since the tool serves Chinese fund data).
+- When touching data/download/announcement pipeline files, follow the bilingual docstring pattern for new public methods. Print statements aimed at the operator (progress, warnings) are commonly in Chinese; code comments explaining logic are usually in English.
+
+**Module docstrings:** every module opens with a triple-quoted docstring summarizing purpose, and pipeline modules include a `Usage:` example with an interactive-shell (`>>>`) snippet showing the primary entry point call, e.g. `src/data/postprocess.py`, `src/data/llm_client.py`, `src/data/announcement_processor.py`.
 
 ## Function Design
 
-**Size:** Functions are typically 10-50 lines, focused on single responsibility
+**Size:** Functions are typically 15–60 lines; pipeline "orchestrator" functions like `AnnouncementProcessor.run` and `postprocess()` are longer (60–120 lines) but stay flat (few nested branches) by delegating to well-named helpers.
 
-**Parameters:**
-- Use named parameters for clarity
-- Provide default values for optional parameters
-- Use `float('inf')` as sentinel for "unlimited" or "maximum"
+**Parameters:** Keyword-style call sites are preferred for functions with more than 2-3 args; defaults are given for optional pipeline knobs (`concurrency: int = DEFAULT_CONCURRENCY`, `limit: int = 0`). Module-level constants (`DEFAULT_CONCURRENCY = 50`, `SAVE_INTERVAL = 50`, `BASE_URL`, `MODEL`) hold tunable pipeline parameters instead of magic numbers inline.
 
-**Return Values:**
-- Return typed objects (DataFrames, dataclasses, dicts)
-- Return `Optional[Type]` when operation may fail silently
-- Return `None` for void operations that may fail
+**Return Values:** Functions that produce pipeline stats return a plain `dict` with fixed keys (e.g. `{"completed": ..., "failed": ..., "total_records": ..., "pending": ...}` from `AnnouncementProcessor.run`; `{"raw": ..., "deduped": ..., "intervals": ...}` from `postprocess()`) rather than custom result classes — follow this convention for new pipeline stage functions.
 
 ## Module Design
 
-**Exports:**
-- Use `__all__` in package `__init__.py` files to define public API
-- Conditional imports handled with try/except and `_MODULE_AVAILABLE` flags
+**Exports:** No `__all__` lists used; public API is whatever is not underscore-prefixed. `src/data/__init__.py`, `src/engine/__init__.py`, `src/strategy/__init__.py` exist as plain namespace markers (check contents before assuming they re-export anything).
 
+**Config objects:** Backtest/strategy configuration is centralized in dataclasses (`src/config.py::BacktestConfig`, consumed by `src/strategy/base.py` and `src/engine/`), rather than passing loose kwargs through the engine.
+
+**Optional dependencies:** External SDKs that are not always installed are imported defensively at module load time with a boolean availability flag, e.g. `src/data/downloader.py`:
 ```python
-# src/data/__init__.py
 try:
-    from .downloader import RealDataDownloader, download_all_lof
-    _DOWNLOADER_AVAILABLE = True
+    import jqdatasdk as jq
+    from jqdatasdk import finance
+    JQ_AVAILABLE = True
 except ImportError:
-    _DOWNLOADER_AVAILABLE = False
-    RealDataDownloader = None
-    download_all_lof = None
-
-__all__ = ["DataLoader", "MockConfig", "generate_mock_data"]
+    JQ_AVAILABLE = False
 ```
-
-**Barrel Files:**
-- Each package exposes key classes through `__init__.py`
-- Avoid circular imports through careful ordering
-
-## Configuration Files
-
-**Format:** YAML for configuration files
-
-**Naming:**
-- Module configs: `configs/backtest.yaml`, `configs/mock.yaml`
-- Example configs: `.env.example`
+`akshare` (the current NAV data source, replacing the legacy JoinQuant NAV path) is instead imported lazily inside `_get_nav_data()` with a friendly error message printed if missing — prefer this lazy-import style for optional dependencies scoped to a single method rather than the whole module.
 
 ---
 
-*Convention analysis: 2025-02-06*
+*Convention analysis: 2026-08-18*
