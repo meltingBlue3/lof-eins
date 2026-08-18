@@ -1,162 +1,71 @@
-# Requirements: LOF Purchase Limit Enhancement
+# Requirements: LOF Purchase Limit Enhancement — v1.1 Stabilization & Refactor
 
-**Defined:** 2026-02-06
-**Core Value:** Accurate purchase limit data enables reliable arbitrage strategy backtesting
+**Defined:** 2026-08-18
+**Core Value:** Accurate purchase limit data enables reliable arbitrage strategy backtesting — this milestone protects that value by closing the test/safety gaps that let a real 7x PnL-inflation bug ship undetected, and reconciles planning docs with what's actually running in production.
 
-## v1 Requirements
+## v1.1 Requirements
 
-### Bug Fixes
+### Planning Reconciliation
 
-- [x] **BUG-01**: DataLoader correctly handles NULL end_date for open-ended limits
-  - Fix `_resample_limits_to_daily()` to detect pd.isna(end) and apply mask accordingly
-  - Test case: Event with end_date=NULL should apply to all dates >= start_date
+- [ ] **DOC-01**: PROJECT.md/ROADMAP.md accurately describe the shipped architecture (async Kimi K2.5 → dual-provider LLM client, `postprocess.py` state machine, akshare NAV) instead of the original Ollama-only / `LimitEventTimelineBuilder` design that was never built as specified
+- [ ] **DOC-02**: README.md and TECHNICAL_PROPOSAL.md updated to describe the current pipeline — no lingering Ollama-only claims, `postprocess.py` documented as the timeline-integration step
 
-- [x] **BUG-02**: Database schema allows NULL end_date consistently
-  - Update `downloader.py` CREATE TABLE to remove NOT NULL constraint on end_date
-  - Ensure `generators.py` mock data respects nullable schema
+### LLM Provider Flexibility
 
-### PDF Processing
+- [ ] **LLM-01**: `LLMClient` supports switching between Kimi K2.5, other OpenAI-compatible cloud APIs, and local Ollama via configuration (base_url + api_key + model), restoring the quick-004 dual-provider design on top of the current async client
+- [ ] **LLM-02**: When configured for a provider without file-upload support (e.g. Ollama), the pipeline falls back to local PDF text extraction (`pdf_extractor.py`) before the chat-completion call
+- [ ] **LLM-03**: Default behavior (Kimi K2.5, no provider override) is unchanged — existing extraction accuracy/throughput preserved
 
-- [x] **PDF-01**: Extract text from downloaded PDF announcements
-  - Implement text extraction using pdfplumber or PyPDF2
-  - Handle Chinese text encoding correctly
-  - Clean and normalize extracted text
+### Postprocess Pipeline Hardening
 
-- [x] **PDF-02**: Parse limit information using local LLM
-  - Design extraction prompt for four announcement types
-  - Call Ollama API with structured JSON output
-  - Extract: has_limit_info, limit_type, start_date, end_date, max_amount, confidence
+- [ ] **STAB-01**: `tests/test_postprocess.py` covers `build_limit_events()`'s suspend/resume pairing — including holiday-resume-in-the-middle and missing-prior-suspend synthetic-interval cases, i.e. regression coverage for the exact bug fixed in commit `89830c8`
+- [ ] **STAB-02**: `validate()` findings can block `postprocess()` from writing `limit_events` when data-quality issues exceed a configurable threshold, instead of only printing warnings
+- [ ] **STAB-03**: `write_limit_events()` writes to a staging table and swaps atomically instead of `DROP TABLE` + rewrite, so a bad run can't destroy the last-known-good `limit_events` table
 
-- [x] **PDF-03**: Store raw parse results in announcement_parses table
-  - Create table with: id, ticker, announcement_date, pdf_filename, parse_result (JSON), parse_type, confidence, processed flag
-  - Save each PDF parse result immediately after extraction
+### Data Fetch Reliability
 
-### Timeline Integration
+- [ ] **REL-01**: LLM extraction calls retry with backoff on transient errors (429/5xx/timeout) before a PDF is marked failed
+- [ ] **REL-02**: akshare NAV fetch loop rate-limits between per-fund calls (matching the existing JoinQuant/announcement-downloader pattern)
+- [ ] **REL-03**: akshare NAV response columns are validated against the expected schema, failing loudly on drift instead of silently producing empty/garbage NAV data
 
-- [ ] **TIM-01**: Implement timeline integration algorithm
-  - Sort raw parses by announcement_date
-  - Handle complete interval: create event with start and end
-  - Handle open-start: create event with NULL end_date
-  - Handle end-only (resume): close current open event
-  - Handle end-only (extend): extend current event end_date
+### Hygiene
 
-- [ ] **TIM-02**: Merge overlapping limit intervals
-  - Implement O(n log n) sort-then-merge algorithm
-  - Handle overlap detection: start_date <= last_end
-  - Merge by extending end_date to max(end1, end2)
-  - Use stricter max_amount when merging (min of both)
-
-- [ ] **TIM-03**: Save integrated events to limit_events table
-  - Insert or update events with proper date ranges
-  - Store source_announcement_ids as JSON array
-  - Set is_open_ended flag based on NULL end_date
-
-### Database Schema
-
-- [x] **DB-01**: Create announcement_parses table
-  - Schema: id, ticker, announcement_date, pdf_filename, parse_result (JSON), parse_type, confidence, processed, created_at
-  - Add indexes on ticker and processed fields
-
-- [x] **DB-02**: Update limit_events schema
-  - Ensure end_date is nullable
-  - Add is_open_ended generated column
-  - Add source_announcement_ids text field (JSON)
-  - Add reason field for audit trail
-
-- [x] **DB-03**: Create limit_event_log table (optional but recommended)
-  - Schema: id, ticker, operation, old_start, old_end, new_start, new_end, triggered_by, created_at
-  - For debugging and auditing timeline changes
-
-### Integration & Validation
-
-- [ ] **INT-01**: Create process_announcements.py CLI script
-  - Accept ticker argument or process all tickers
-  - Orchestrate: extract → parse → integrate → save
-  - Show progress and summary statistics
-
-- [ ] **INT-02**: Populate fund_status.db with real limit data
-  - Ensure all downloaded announcements are processed
-  - Handle errors gracefully (skip failed PDFs, log warnings)
-  - Validate: no duplicate events, no gaps in coverage
-
-- [ ] **VAL-01**: Backtest correctly applies purchase limits
-  - Verify SimpleLOFStrategy respects daily_limit
-  - Test: signal generation when premium > threshold but limit = 0
-  - Confirm: no trades executed when fund is under restriction
-
-- [ ] **VAL-02**: Add validation to detect timeline issues
-  - Detect overlapping events that weren't merged
-  - Identify gaps between limit periods
-  - Flag events with suspicious dates (future dates, end < start)
-
-## v2 Requirements
-
-### Enhanced Features
-
-- **LLM-01**: Fine-tune local LLM for fund announcement parsing
-  - Collect labeled training data from manual validation
-  - Improve extraction accuracy for ambiguous announcements
-  - Reduce false positives/negatives
-
-- **MON-01**: Real-time announcement monitoring (optional)
-  - Periodic check for new announcements
-  - Auto-trigger processing pipeline
-  - Notification on critical limit changes
-
-- **VIS-01**: Visualize limit timeline
-  - Plot limit periods on price chart
-  - Highlight restriction periods
-  - Show announcement annotations
-
-### Performance & Scale
-
-- **PERF-01**: Batch PDF processing optimization
-  - Parallel processing of multiple PDFs
-  - Connection pooling for Ollama API
-  - Progress bars and ETA estimation
-
-- **CACHE-01**: Cache LLM extraction results
-  - Hash PDF content to detect changes
-  - Skip re-processing unchanged files
-  - Invalidate cache when model updates
+- [ ] **HYG-01**: `requirements.txt` matches actual imports — remove unused `ollama`, add `akshare`
+- [ ] **HYG-02**: `.env.example` documents every env var the codebase actually reads (LLM provider config, `KIMI_API_KEY`, `JQ_USERNAME`/`JQ_PASSWORD`)
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Real-time monitoring | Focus on historical backtesting accuracy first |
-| Cloud LLM APIs | Must use local Ollama for cost and privacy |
-| Non-LOF fund types | Out of project scope |
-| Multi-language support | Chinese announcements only |
-| Live trading integration | Backtesting only |
-| Web UI | Command-line tools sufficient |
-| Mobile app | Not applicable for data processing tool |
+| New user-facing features | This is a stabilization/refactor milestone — behavior changes only where they fix bugs |
+| Changing existing backtest/limit-application logic | Already validated correct (post `89830c8`); only the data pipeline feeding it is being hardened |
+| Adaptive/dynamic LLM concurrency tuning | `DEFAULT_CONCURRENCY` is already CLI-configurable; auto-tuning is a v2 nicety, not a stability requirement |
+| ORM / schema migration framework for SQLite | Out of proportion to project size; transaction-safety fix (STAB-03) addresses the actual risk |
+| Incremental/delta postprocessing (only reprocess new announcements) | Performance concern only at much larger data volumes than current; not a correctness or reliability issue |
+| Downloader class naming/base-class unification | Low-risk cosmetic issue per CONCERNS.md; not worth the churn in a stabilization milestone |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BUG-01 | Phase 1 | **Complete** |
-| BUG-02 | Phase 1 | **Complete** |
-| PDF-01 | Phase 2 | **Complete** |
-| PDF-02 | Phase 2 | **Complete** |
-| PDF-03 | Phase 2 | **Complete** |
-| TIM-01 | Phase 3 | Pending |
-| TIM-02 | Phase 3 | Pending |
-| TIM-03 | Phase 3 | Pending |
-| DB-01 | Phase 1 | **Complete** |
-| DB-02 | Phase 1 | **Complete** |
-| DB-03 | Phase 1 | **Complete** |
-| INT-01 | Phase 4 | Pending |
-| INT-02 | Phase 4 | Pending |
-| VAL-01 | Phase 4 | Pending |
-| VAL-02 | Phase 4 | Pending |
+| DOC-01 | TBD | Pending |
+| DOC-02 | TBD | Pending |
+| LLM-01 | TBD | Pending |
+| LLM-02 | TBD | Pending |
+| LLM-03 | TBD | Pending |
+| STAB-01 | TBD | Pending |
+| STAB-02 | TBD | Pending |
+| STAB-03 | TBD | Pending |
+| REL-01 | TBD | Pending |
+| REL-02 | TBD | Pending |
+| REL-03 | TBD | Pending |
+| HYG-01 | TBD | Pending |
+| HYG-02 | TBD | Pending |
 
 **Coverage:**
-- v1 requirements: 15 total
-- Mapped to phases: 15
-- Unmapped: 0 ✓
+- v1.1 requirements: 13 total
+- Mapped to phases: 0 (roadmap pending)
+- Unmapped: 13
 
 ---
-*Requirements defined: 2026-02-06*
-*Last updated: 2026-02-06 after Phase 2 completion*
+*Requirements defined: 2026-08-18*
