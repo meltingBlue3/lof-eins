@@ -307,54 +307,88 @@ def build_limit_events(records: List[dict]) -> List[dict]:
 
 
 def write_limit_events(db_path: str | Path, events: List[dict]):
-    """Write intervals to limit_events table (replaces existing data)."""
-    conn = sqlite3.connect(db_path)
+    """Write intervals to limit_events table (replaces existing data).
+
+    Stages every row into a scratch `limit_events_new` table inside a single
+    explicit transaction, and only drops/replaces the live `limit_events`
+    table once every insert has succeeded. A failure at any point rolls the
+    whole transaction back -- including the staging table's own creation --
+    so the previously-written `limit_events` table is left byte-identical
+    and the exception is re-raised for the caller to see.
+    """
+    # isolation_level=None disables the driver's implicit-transaction
+    # handling entirely, so an explicit BEGIN below is the only thing that
+    # opens a transaction. This matters because the driver only opens an
+    # implicit transaction ahead of data-manipulation statements, not
+    # data-definition ones -- without this, the DROP/CREATE/ALTER statements
+    # here would each commit immediately and defeat the whole design.
+    conn = sqlite3.connect(db_path, isolation_level=None)
     cursor = conn.cursor()
 
-    # Recreate limit_events table with current schema
-    cursor.execute("DROP TABLE IF EXISTS limit_events")
-    cursor.execute("""
-        CREATE TABLE limit_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT NOT NULL,
-            start_date DATE NOT NULL,
-            end_date DATE,
-            max_amount REAL NOT NULL,
-            reason TEXT,
-            source_announcement_ids TEXT DEFAULT '[]',
-            is_open_ended INTEGER GENERATED ALWAYS AS (
-                CASE WHEN end_date IS NULL THEN 1 ELSE 0 END
-            ) STORED
-        )
-    """)
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_limit_events_ticker
-        ON limit_events(ticker)
-    """)
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_limit_events_is_open_ended
-        ON limit_events(is_open_ended)
-    """)
+    in_transaction = False
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        in_transaction = True
 
-    for ev in events:
-        cursor.execute(
-            """
-            INSERT INTO limit_events
-            (ticker, start_date, end_date, max_amount, reason, source_announcement_ids)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                ev["ticker"],
-                ev["start_date"],
-                ev["end_date"],
-                ev["max_amount"],
-                ev["reason"],
-                ev.get("source_announcement_ids", "[]"),
-            ),
-        )
+        # Clear any staging-table residue left by a hard process kill on a
+        # previous run.
+        cursor.execute("DROP TABLE IF EXISTS limit_events_new")
+        cursor.execute("""
+            CREATE TABLE limit_events_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                start_date DATE NOT NULL,
+                end_date DATE,
+                max_amount REAL NOT NULL,
+                reason TEXT,
+                source_announcement_ids TEXT DEFAULT '[]',
+                is_open_ended INTEGER GENERATED ALWAYS AS (
+                    CASE WHEN end_date IS NULL THEN 1 ELSE 0 END
+                ) STORED
+            )
+        """)
 
-    conn.commit()
-    conn.close()
+        for ev in events:
+            cursor.execute(
+                """
+                INSERT INTO limit_events_new
+                (ticker, start_date, end_date, max_amount, reason, source_announcement_ids)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ev["ticker"],
+                    ev["start_date"],
+                    ev["end_date"],
+                    ev["max_amount"],
+                    ev["reason"],
+                    ev.get("source_announcement_ids", "[]"),
+                ),
+            )
+
+        # Every row is staged -- only now touch the live table.
+        cursor.execute("DROP TABLE IF EXISTS limit_events")
+        cursor.execute("ALTER TABLE limit_events_new RENAME TO limit_events")
+        cursor.execute("""
+            CREATE INDEX idx_limit_events_ticker
+            ON limit_events(ticker)
+        """)
+        cursor.execute("""
+            CREATE INDEX idx_limit_events_is_open_ended
+            ON limit_events(is_open_ended)
+        """)
+
+        cursor.execute("COMMIT")
+        in_transaction = False
+    except Exception:
+        if in_transaction:
+            # Rolling back also drops limit_events_new, since it was
+            # created inside this same transaction -- no separate cleanup
+            # needed on this path.
+            cursor.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+
     print(f"已写入 {len(events)} 条 limit_events")
 
 
