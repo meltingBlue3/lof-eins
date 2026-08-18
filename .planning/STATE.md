@@ -4,16 +4,16 @@ milestone: v1.1
 milestone_name: Stabilization & Refactor
 current_phase: 04
 current_phase_name: postprocess-pipeline-hardening
-status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-08-18T12:43:47.623Z"
+status: verifying
+stopped_at: Completed 04-postprocess-pipeline-hardening/04-04-PLAN.md (final plan of phase 4)
+last_updated: "2026-08-18T14:36:23.308Z"
 last_activity: 2026-08-18
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 1
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
 ---
 
 # Project State: LOF Fund Arbitrage Backtesting System
@@ -30,10 +30,10 @@ See: `.planning/PROJECT.md` (updated 2026-08-18)
 
 Phase: 04 (postprocess-pipeline-hardening) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-18 — Phase 04 execution started
 
-Progress: [████████░░] 75% (0/7 phases across v1.0+v1.1; v1.0 Phases 1-2 complete, Phase 3 superseded by ad-hoc `postprocess.py` delivery, v1.1 Phases 4-7 not started)
+Progress: [██████████] 100% (0/7 phases across v1.0+v1.1; v1.0 Phases 1-2 complete, Phase 3 superseded by ad-hoc `postprocess.py` delivery, v1.1 Phases 4-7 not started)
 
 ## Performance Metrics
 
@@ -59,6 +59,7 @@ Progress: [████████░░] 75% (0/7 phases across v1.0+v1.1; v1.
 | Phase 04 P01 | 20min | 2 tasks | 3 files |
 | Phase 04 P02 | ~25min | 2 tasks | 2 files |
 | Phase 04 P03 | ~20min | 2 tasks | 2 files |
+| Phase 04 P04 | 45min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -73,6 +74,7 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase ?]: [Phase 04-02] KNOWN_RESTRICTION_TYPES allowlist mirrors the subscription_restrictions CHECK constraint; unknown non-empty types raise/flag, None/empty stays tolerated
 - [Phase ?]: [Phase 04-02] Task 2 (D-06 regression matrix) landed as test-only commit — all five scenarios passed against existing behavior, no production fix needed
 - [Phase ?]: [Phase 04-03] write_limit_events() rewritten to stage every row into limit_events_new inside one BEGIN IMMEDIATE transaction, swapping the live table in only after the last insert succeeds; failures roll back (removing staging residue) and re-raise
+- [Phase 04]: Checkpoint decision for real-data validation (04-04): triage-data selected for the 390 blocking findings (373 staleness / 109 funds, 17 date-order inversions); fix-validate-pairing was ruled out by direct measurement (aligning validate() to skip holiday resumes raises staleness from 373 to 609, not down). Overlapping-interval defect (529 pairs + pre-existing test failure) split into backlog Phase 999.1. — D-08 required surfacing real-data findings for developer triage rather than softening the validation rule; the pairing-hypothesis measurement gave the developer evidence rather than a guess to decide from.
 
 ### Pending Todos
 
@@ -96,8 +98,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-18T12:43:47.612Z
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-08-18T14:36:05.787Z
+Stopped at: Completed 04-postprocess-pipeline-hardening/04-04-PLAN.md (final plan of phase 4)
 Resume file: None
 
 **Next action:** `/gsd-plan-phase 4` (Postprocess Pipeline Hardening)

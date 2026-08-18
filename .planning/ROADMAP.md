@@ -43,7 +43,7 @@ Original phase plans and summaries are archived at `.planning/milestones/v1.0-ph
   3. `write_limit_events()` writes to a staging table and swaps atomically, so a run that fails partway through leaves the previous `limit_events` table intact and queryable
   4. The full existing test suite still passes — no behavior change on the happy path (bug fixes excepted). Baseline recorded at planning time: 105 tests, 1 pre-existing failure (`test_open_ended_limits.TestOpenEndedLimits.test_overlapping_limits_last_one_wins`, loader/engine limit-application logic, out of scope per REQUIREMENTS). Criterion is read as "no new failures beyond that baseline".
 
-**Plans**: 3/4 plans executed
+**Plans**: 4/4 plans executed
 
 Plans:
 **Wave 1**
@@ -60,7 +60,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 04-04-PLAN.md — D-08 real-database validation run, suite baseline, blocking triage decision (STAB-01/02/03)
+- [x] 04-04-PLAN.md — D-08 real-database validation run, suite baseline, blocking triage decision (STAB-01/02/03)
 
 ### Phase 5: Dual-Provider LLM Client & Extraction Reliability
 
@@ -112,7 +112,7 @@ Phases 4, 5, and 6 have no hard interdependency and may be executed in any order
 | 1. Foundation | v1.0 | 4/4 | Complete | 2026-02-06 |
 | 2. PDF Processing | v1.0 | 3/3 | Complete | 2026-02-06 |
 | 3. Timeline Integration | v1.0 | — | Superseded by `postprocess.py` (shipped outside GSD process) | 2026-04 |
-| 4. Postprocess Pipeline Hardening | v1.1 | 3/4 | In Progress|  |
+| 4. Postprocess Pipeline Hardening | v1.1 | 4/4 | In Progress|  |
 | 5. Dual-Provider LLM Client & Extraction Reliability | v1.1 | 0/? | Not started | - |
 | 6. Data Fetch Reliability (akshare NAV) | v1.1 | 0/? | Not started | - |
 | 7. Planning Docs & Hygiene Reconciliation | v1.1 | 0/? | Not started | - |
@@ -128,11 +128,13 @@ Phases 4, 5, and 6 have no hard interdependency and may be executed in any order
 **Plans:** 0 plans
 
 Captured from Phase 4's real-data validation checkpoint (`04-04`, decision: `triage-data` for the 390 blocking validation findings; this item is the separate "give overlap resolution a proper home" follow-up the checkpoint context called for). Evidence:
+
 - 529 overlapping interval pairs across 77 distinct funds, measured by `build_limit_events()` against a copy of the real `fund_status.db` — see `.planning/phases/04-postprocess-pipeline-hardening/04-REAL-DB-VALIDATION.md` section 3b.
 - Pre-existing test failure `test_overlapping_limits_last_one_wins` (`tests/test_open_ended_limits.py`) — same underlying gap, unresolved since before Phase 4 and explicitly out of scope for it (see `.planning/REQUIREMENTS.md` Out of Scope table and `04-REAL-DB-VALIDATION.md` section 5).
 - Lives in `src/data/loader.py` and `src/backtest/engine.py`, not `src/data/postprocess.py` — outside Phase 4's module boundary.
 
 Plans:
+
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
 ---
