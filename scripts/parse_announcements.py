@@ -50,7 +50,7 @@ except ImportError:
     pass
 
 from src.data.announcement_processor import AnnouncementProcessor
-from src.data.postprocess import postprocess
+from src.data.postprocess import postprocess, ValidationBlockedError
 
 
 def main():
@@ -120,7 +120,14 @@ def main():
         print("\n" + "=" * 60)
         print("后处理: subscription_restrictions → limit_events")
         print("=" * 60)
-        postprocess(db_path)
+        try:
+            postprocess(db_path)
+        except ValidationBlockedError as e:
+            print("错误：校验未通过，已阻止写入 limit_events：", file=sys.stderr)
+            for issue in e.issues:
+                print(issue, file=sys.stderr)
+            print(f"共 {len(e.issues)} 个问题", file=sys.stderr)
+            sys.exit(1)
 
 
 if __name__ == "__main__":

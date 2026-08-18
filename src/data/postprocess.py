@@ -21,6 +21,19 @@ from pathlib import Path
 from typing import Dict, List
 
 
+class ValidationBlockedError(RuntimeError):
+    """Raised by postprocess() when validate() reports one or more issues.
+
+    Carries the full issue list so callers (e.g. the CLI) can surface every
+    finding to the operator. limit_events is never written when this is
+    raised.
+    """
+
+    def __init__(self, issues: List[str]):
+        self.issues: List[str] = issues
+        super().__init__(f"校验未通过，已阻止写入 limit_events: {len(issues)} 个问题")
+
+
 def load_records(db_path: str | Path) -> List[dict]:
     """Load all records from subscription_restrictions table."""
     conn = sqlite3.connect(db_path)
@@ -306,8 +319,12 @@ def write_limit_events(db_path: str | Path, events: List[dict]):
     print(f"已写入 {len(events)} 条 limit_events")
 
 
-def validate(records: List[dict]):
-    """Backtest readiness validation."""
+def validate(records: List[dict]) -> List[str]:
+    """Backtest readiness validation.
+
+    Returns:
+        The list of issue strings found (empty list when there are none).
+    """
     issues = []
     by_fund = defaultdict(list)
     for r in records:
@@ -353,6 +370,8 @@ def validate(records: List[dict]):
     if len(issues) > 20:
         print(f"  ... 还有 {len(issues) - 20} 个")
 
+    return issues
+
 
 def postprocess(db_path: str | Path) -> dict:
     """
@@ -364,6 +383,11 @@ def postprocess(db_path: str | Path) -> dict:
 
     Returns:
         Stats dict.
+
+    Raises:
+        ValidationBlockedError: when validate() reports one or more issues.
+            limit_events is not written in this case; the previously written
+            table (if any) is left untouched.
     """
     db_path = Path(db_path)
 
@@ -377,7 +401,9 @@ def postprocess(db_path: str | Path) -> dict:
     records = dedup_records(records)
     records = fix_resume_type(records)
 
-    validate(records)
+    issues = validate(records)
+    if issues:
+        raise ValidationBlockedError(issues)
 
     events = build_limit_events(records)
     write_limit_events(db_path, events)
