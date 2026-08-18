@@ -418,6 +418,42 @@ class TestValidateHolidayResumeStaleness(PostprocessDBTestCase):
         )
 
 
+class TestExplicitEndDatePrecedence(PostprocessDBTestCase):
+    """CR-03 regression: a restrict/suspend record that already carries its
+    own explicit end_date from the announcement must keep it, even when an
+    unrelated later resume exists further down that fund's timeline."""
+
+    def test_explicit_end_date_is_not_overwritten_by_unrelated_later_resume(self):
+        records = [
+            {
+                "fund_code": "160105",
+                "effective_date": "2022-01-01",
+                "end_date": "2022-03-01",
+                "action": "restrict",
+                "restriction_type": "amount_limit",
+                "limit_amount": 500000,
+                "reason": "第一次限购公告自带结束日期",
+                "source_file": "a.pdf",
+            },
+            {
+                "fund_code": "160105",
+                "effective_date": "2022-06-01",
+                "action": "resume",
+                "restriction_type": "amount_limit",
+                "source_file": "b.pdf",
+            },
+        ]
+        events = build_limit_events(records)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["start_date"], "2022-01-01")
+        self.assertEqual(
+            events[0]["end_date"],
+            "2022-03-01",
+            "the announcement's own explicit end_date was overwritten by "
+            "an unrelated later resume",
+        )
+
+
 class TestZeroIntervalGuard(PostprocessDBTestCase):
     """CR-01 regression: non-empty subscription_restrictions that derive
     zero limit_events intervals must block the write rather than silently

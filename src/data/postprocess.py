@@ -227,6 +227,13 @@ def build_limit_events(records: List[dict]) -> List[dict]:
                 if rtype in ("holiday_suspension", "application_invalid"):
                     if not end:
                         end = start
+                elif end:
+                    # The announcement itself already stated an explicit
+                    # end_date -- that is authoritative. Do NOT let a later,
+                    # unrelated resume's date overwrite it (CR-03): the
+                    # resume-lookahead below is only a fallback for records
+                    # that did not carry their own end_date.
+                    pass
                 else:
                     # Look for matching resume (skip holiday resumes)
                     found_resume = False
