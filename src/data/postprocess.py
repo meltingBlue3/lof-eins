@@ -492,6 +492,13 @@ def postprocess(db_path: str | Path) -> dict:
         raise ValidationBlockedError(issues)
 
     events = build_limit_events(records)
+    if records and not events:
+        raise ValidationBlockedError(
+            [
+                f"  {len(records)} 条原始记录，但构建出 0 个 limit_events 区间 "
+                "-- 拒绝清空现有 limit_events，请人工确认后再处理"
+            ]
+        )
     write_limit_events(db_path, events)
 
     return {

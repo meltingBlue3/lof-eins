@@ -373,6 +373,57 @@ class TestEmptyInput(PostprocessDBTestCase):
         self.assertEqual(before, after)
 
 
+class TestZeroIntervalGuard(PostprocessDBTestCase):
+    """CR-01 regression: non-empty subscription_restrictions that derive
+    zero limit_events intervals must block the write rather than silently
+    swapping in an empty table and wiping every fund's previously-computed
+    backtest data."""
+
+    def test_records_with_zero_derived_intervals_block_write_and_leave_limit_events_untouched(self):
+        sentinel_rows = [
+            {
+                "ticker": "999999",
+                "start_date": "2020-01-01",
+                "end_date": "2020-01-05",
+                "max_amount": 0.0,
+                "reason": "sentinel-1",
+                "source_announcement_ids": "[]",
+            },
+        ]
+        self._seed_limit_events(sentinel_rows)
+        before = self._read_limit_events()
+
+        # A single holiday resume with no other record for that fund:
+        # build_limit_events() derives zero intervals from it (holiday
+        # resumes never open a synthetic interval by themselves), yet the
+        # record set itself is non-empty.
+        self._seed_subscription_restrictions([
+            {
+                "fund_code": "888888",
+                "announcement_date": "2022-01-30",
+                "effective_date": "2022-01-31",
+                "action": "resume",
+                "restriction_type": "holiday_suspension",
+                "source_file": "holiday.pdf",
+            }
+        ])
+
+        with self.assertRaises(ValidationBlockedError) as ctx:
+            postprocess(self.db_path)
+        self.assertTrue(
+            any("0 个 limit_events" in issue for issue in ctx.exception.issues),
+            f"expected a zero-intervals issue, got: {ctx.exception.issues}",
+        )
+
+        after = self._read_limit_events()
+        self.assertEqual(
+            before,
+            after,
+            "a record set deriving zero intervals wiped the previously "
+            "written limit_events table",
+        )
+
+
 class TestUnknownRestrictionType(PostprocessDBTestCase):
     """D-06 scenario 5: an unrecognised non-empty restriction_type must fail
     loudly (build_limit_events raises, validate() flags it), while None/empty
