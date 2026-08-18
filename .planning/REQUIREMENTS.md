@@ -19,7 +19,7 @@
 ### Postprocess Pipeline Hardening
 
 - [ ] **STAB-01**: `tests/test_postprocess.py` covers `build_limit_events()`'s suspend/resume pairing — including holiday-resume-in-the-middle and missing-prior-suspend synthetic-interval cases, i.e. regression coverage for the exact bug fixed in commit `89830c8`
-- [ ] **STAB-02**: `validate()` findings can block `postprocess()` from writing `limit_events` when data-quality issues exceed a configurable threshold, instead of only printing warnings
+- [x] **STAB-02**: `validate()` findings can block `postprocess()` from writing `limit_events` when data-quality issues exceed a configurable threshold, instead of only printing warnings
 - [ ] **STAB-03**: `write_limit_events()` writes to a staging table and swaps atomically instead of `DROP TABLE` + rewrite, so a bad run can't destroy the last-known-good `limit_events` table
 
 ### Data Fetch Reliability
@@ -54,7 +54,7 @@
 | LLM-02 | Phase 5 | Pending |
 | LLM-03 | Phase 5 | Pending |
 | STAB-01 | Phase 4 | Pending |
-| STAB-02 | Phase 4 | Pending |
+| STAB-02 | Phase 4 | Complete |
 | STAB-03 | Phase 4 | Pending |
 | REL-01 | Phase 5 | Pending |
 | REL-02 | Phase 6 | Pending |
@@ -63,6 +63,7 @@
 | HYG-02 | Phase 7 | Pending |
 
 **Coverage:**
+
 - v1.1 requirements: 13 total
 - Mapped to phases: 13 (Phase 4: STAB-01/02/03; Phase 5: LLM-01/02/03, REL-01; Phase 6: REL-02/03; Phase 7: DOC-01/02, HYG-01/02)
 - Unmapped: 0

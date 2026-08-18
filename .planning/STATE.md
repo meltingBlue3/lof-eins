@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Stabilization & Refactor
-current_phase: 4
-current_phase_name: first phase of milestone v1.1
-status: planning
-stopped_at: Phase 4 context gathered
-last_updated: "2026-08-18T10:16:11.640Z"
+current_phase: 04
+current_phase_name: postprocess-pipeline-hardening
+status: executing
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-08-18T12:29:31.357Z"
 last_activity: 2026-08-18
-last_activity_desc: ROADMAP.md and REQUIREMENTS.md traceability written for v1.1
+last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 4
-  completed_plans: 0
+  completed_plans: 1
 ---
 
 # Project State: LOF Fund Arbitrage Backtesting System
@@ -24,16 +24,16 @@ See: `.planning/PROJECT.md` (updated 2026-08-18)
 
 **Core value:** Accurate purchase limit data enables reliable arbitrage strategy backtesting — v1.1 protects that value by closing the test/safety gaps that let a real 7x PnL-inflation bug ship undetected.
 
-**Current focus:** Phase 4 — Postprocess Pipeline Hardening (roadmap just created, ready to plan)
+**Current focus:** Phase 04 — postprocess-pipeline-hardening
 
 ## Current Position
 
-Phase: 4 of 7 (Postprocess Pipeline Hardening) — first phase of milestone v1.1
-Plan: — (not yet planned)
-Status: Roadmap created, ready to plan
-Last activity: 2026-08-18 — ROADMAP.md and REQUIREMENTS.md traceability written for v1.1
+Phase: 04 (postprocess-pipeline-hardening) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-08-18 — Phase 04 execution started
 
-Progress: [░░░░░░░░░░] 0% (0/7 phases across v1.0+v1.1; v1.0 Phases 1-2 complete, Phase 3 superseded by ad-hoc `postprocess.py` delivery, v1.1 Phases 4-7 not started)
+Progress: [███░░░░░░░] 25% (0/7 phases across v1.0+v1.1; v1.0 Phases 1-2 complete, Phase 3 superseded by ad-hoc `postprocess.py` delivery, v1.1 Phases 4-7 not started)
 
 ## Performance Metrics
 
@@ -52,6 +52,11 @@ Progress: [░░░░░░░░░░] 0% (0/7 phases across v1.0+v1.1; v1.0
 | 4-7 (v1.1) | 0 | - | - |
 
 **Recent Trend:** n/a — v1.1 not yet started
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 04 P01 | 20min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -61,6 +66,8 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 
 - v1.1 scoping: `postprocess.py` (shipped April 2026, commits `4cc5212`/`89830c8`) supersedes the v1.0 `LimitEventTimelineBuilder` design — v1.1 hardens the delivered code rather than reviving the original plan.
 - Phase 4 (postprocess hardening) is deliberately sequenced independent of Phase 5 (LLM provider work) — different files, no code dependency, but Phase 4 is the higher-risk/higher-priority work.
+- [Phase ?]: Promoted 'configurable threshold' wording to unconditional any-issue-blocks rule per D-01/D-02 (assumption-delta decision)
+- [Phase ?]: Task 2's 180-day boundary tests build dates from datetime.now() at test-run time so assertions do not rot
 
 ### Pending Todos
 
@@ -84,8 +91,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-18T09:47:12.250Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-postprocess-pipeline-hardening/04-CONTEXT.md
+Last session: 2026-08-18T12:29:31.348Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None
 
 **Next action:** `/gsd-plan-phase 4` (Postprocess Pipeline Hardening)
