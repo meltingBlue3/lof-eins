@@ -12,6 +12,7 @@ v1.1 does not add user-facing features. It hardens the announcement-parsing pipe
 ## Phases
 
 **Phase Numbering:**
+
 - Continues from v1.0 (Phases 1-3). v1.1 starts at Phase 4 — never restart at 01.
 - Integer phases (4, 5, 6, 7): Planned milestone work.
 - Decimal phases (e.g. 4.1): Urgent insertions (marked with INSERTED).
@@ -36,16 +37,29 @@ Original phase plans and summaries are archived at `.planning/milestones/v1.0-ph
 **Depends on**: Nothing (first phase of v1.1; deliberately independent of Phase 5's LLM work — highest-priority, highest-risk phase in this milestone)
 **Requirements**: STAB-01, STAB-02, STAB-03
 **Success Criteria** (what must be TRUE):
+
   1. `pytest tests/test_postprocess.py` exists, passes, and includes cases for holiday-resume-in-the-middle and missing-prior-suspend synthetic-interval scenarios — regression coverage for the exact bug fixed in commit `89830c8`
   2. `postprocess()` refuses to write `limit_events` (returns a clear error/non-zero exit rather than only printing) when `validate()` findings exceed a configurable threshold
   3. `write_limit_events()` writes to a staging table and swaps atomically, so a run that fails partway through leaves the previous `limit_events` table intact and queryable
   4. The full existing test suite still passes — no behavior change on the happy path (bug fixes excepted). Baseline recorded at planning time: 105 tests, 1 pre-existing failure (`test_open_ended_limits.TestOpenEndedLimits.test_overlapping_limits_last_one_wins`, loader/engine limit-application logic, out of scope per REQUIREMENTS). Criterion is read as "no new failures beyond that baseline".
+
 **Plans**: 4 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 04-01-PLAN.md — Tracer: validation gate blocks the write end-to-end (`validate()` returns findings, `postprocess()` refuses, CLI exits non-zero) + temp-DB test harness (STAB-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 04-02-PLAN.md — `89830c8` regression matrix, fail-loud on unknown `restriction_type`, inverted-interval clamp (STAB-01)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 04-03-PLAN.md — `write_limit_events()` staging table + single-transaction atomic swap (STAB-03)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 04-04-PLAN.md — D-08 real-database validation run, suite baseline, blocking triage decision (STAB-01/02/03)
 
 ### Phase 5: Dual-Provider LLM Client & Extraction Reliability
@@ -54,10 +68,12 @@ Plans:
 **Depends on**: Nothing (independent of Phase 4 — different files/subsystem; may proceed in parallel or before/after per milestone priority)
 **Requirements**: LLM-01, LLM-02, LLM-03, REL-01
 **Success Criteria** (what must be TRUE):
+
   1. `LLMClient` accepts `base_url`/`api_key`/`model` configuration that switches between Kimi K2.5, another OpenAI-compatible endpoint, and local Ollama, demonstrated by tests/runs exercising each mode
   2. When configured for a provider without file-upload support (e.g. Ollama), extraction runs `pdf_extractor.py`'s local text extraction before the chat-completion call and produces correct records for a sample PDF
   3. Running `scripts/parse_announcements.py` with default configuration (no provider override) produces the same extraction behavior as before this phase — existing Kimi-path tests still pass unchanged
   4. A transient LLM API error (429/5xx/timeout) is retried with backoff and a PDF is only marked failed after retries are exhausted, verified by a test simulating a transient failure
+
 **Plans**: TBD
 
 ### Phase 6: Data Fetch Reliability (akshare NAV)
@@ -66,8 +82,10 @@ Plans:
 **Depends on**: Nothing (independent — touches `src/data/downloader.py` only, unrelated to Phases 4/5)
 **Requirements**: REL-02, REL-03
 **Success Criteria** (what must be TRUE):
+
   1. `_get_nav_data()`'s per-ticker loop pauses between akshare calls, matching the existing rate-limiting pattern already used by the JoinQuant batch loop and the announcement downloader
   2. akshare NAV response columns are validated against the expected schema immediately after fetch; a schema mismatch raises/logs a clear error instead of silently producing empty or garbage NAV data, verified by a test simulating an unexpected column set
+
 **Plans**: TBD
 
 ### Phase 7: Planning Docs & Hygiene Reconciliation
@@ -76,10 +94,12 @@ Plans:
 **Depends on**: Phase 4, Phase 5, Phase 6 (documents the final architecture shipped across this milestone, including the new provider-config env vars from Phase 5 and reliability additions from Phases 4/6)
 **Requirements**: DOC-01, DOC-02, HYG-01, HYG-02
 **Success Criteria** (what must be TRUE):
+
   1. PROJECT.md and ROADMAP.md describe the shipped architecture (async Kimi K2.5 → dual-provider LLM client, `postprocess.py` state machine, akshare NAV) with no lingering references to the original Ollama-only / `LimitEventTimelineBuilder` design as if still pending
   2. README.md and TECHNICAL_PROPOSAL.md describe the current pipeline — `postprocess.py` documented as the timeline-integration step, no lingering Ollama-only claims
   3. `requirements.txt` matches actual imports: unused `ollama` package removed, `akshare` present
   4. `.env.example` documents every env var the codebase actually reads, including LLM provider config (base_url/api_key/model switching from Phase 5), `KIMI_API_KEY`, and `JQ_USERNAME`/`JQ_PASSWORD`
+
 **Plans**: TBD
 
 ## Progress
