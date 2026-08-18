@@ -5,15 +5,15 @@ milestone_name: Stabilization & Refactor
 current_phase: 04
 current_phase_name: postprocess-pipeline-hardening
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-08-18T12:29:31.357Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-08-18T12:38:04.453Z"
 last_activity: 2026-08-18
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State: LOF Fund Arbitrage Backtesting System
@@ -29,11 +29,11 @@ See: `.planning/PROJECT.md` (updated 2026-08-18)
 ## Current Position
 
 Phase: 04 (postprocess-pipeline-hardening) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-08-18 — Phase 04 execution started
 
-Progress: [███░░░░░░░] 25% (0/7 phases across v1.0+v1.1; v1.0 Phases 1-2 complete, Phase 3 superseded by ad-hoc `postprocess.py` delivery, v1.1 Phases 4-7 not started)
+Progress: [█████░░░░░] 50% (0/7 phases across v1.0+v1.1; v1.0 Phases 1-2 complete, Phase 3 superseded by ad-hoc `postprocess.py` delivery, v1.1 Phases 4-7 not started)
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Progress: [███░░░░░░░] 25% (0/7 phases across v1.0+v1.1; v1.
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 04 P01 | 20min | 2 tasks | 3 files |
+| Phase 04 P02 | ~25min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -68,6 +69,8 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - Phase 4 (postprocess hardening) is deliberately sequenced independent of Phase 5 (LLM provider work) — different files, no code dependency, but Phase 4 is the higher-risk/higher-priority work.
 - [Phase ?]: Promoted 'configurable threshold' wording to unconditional any-issue-blocks rule per D-01/D-02 (assumption-delta decision)
 - [Phase ?]: Task 2's 180-day boundary tests build dates from datetime.now() at test-run time so assertions do not rot
+- [Phase ?]: [Phase 04-02] KNOWN_RESTRICTION_TYPES allowlist mirrors the subscription_restrictions CHECK constraint; unknown non-empty types raise/flag, None/empty stays tolerated
+- [Phase ?]: [Phase 04-02] Task 2 (D-06 regression matrix) landed as test-only commit — all five scenarios passed against existing behavior, no production fix needed
 
 ### Pending Todos
 
@@ -91,8 +94,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-18T12:29:31.348Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-08-18T12:38:04.437Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
 
 **Next action:** `/gsd-plan-phase 4` (Postprocess Pipeline Hardening)

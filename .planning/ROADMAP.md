@@ -43,7 +43,7 @@ Original phase plans and summaries are archived at `.planning/milestones/v1.0-ph
   3. `write_limit_events()` writes to a staging table and swaps atomically, so a run that fails partway through leaves the previous `limit_events` table intact and queryable
   4. The full existing test suite still passes — no behavior change on the happy path (bug fixes excepted). Baseline recorded at planning time: 105 tests, 1 pre-existing failure (`test_open_ended_limits.TestOpenEndedLimits.test_overlapping_limits_last_one_wins`, loader/engine limit-application logic, out of scope per REQUIREMENTS). Criterion is read as "no new failures beyond that baseline".
 
-**Plans**: 1/4 plans executed
+**Plans**: 2/4 plans executed
 
 Plans:
 **Wave 1**
@@ -52,7 +52,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 04-02-PLAN.md — `89830c8` regression matrix, fail-loud on unknown `restriction_type`, inverted-interval clamp (STAB-01)
+- [x] 04-02-PLAN.md — `89830c8` regression matrix, fail-loud on unknown `restriction_type`, inverted-interval clamp (STAB-01)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -112,7 +112,7 @@ Phases 4, 5, and 6 have no hard interdependency and may be executed in any order
 | 1. Foundation | v1.0 | 4/4 | Complete | 2026-02-06 |
 | 2. PDF Processing | v1.0 | 3/3 | Complete | 2026-02-06 |
 | 3. Timeline Integration | v1.0 | — | Superseded by `postprocess.py` (shipped outside GSD process) | 2026-04 |
-| 4. Postprocess Pipeline Hardening | v1.1 | 1/4 | In Progress|  |
+| 4. Postprocess Pipeline Hardening | v1.1 | 2/4 | In Progress|  |
 | 5. Dual-Provider LLM Client & Extraction Reliability | v1.1 | 0/? | Not started | - |
 | 6. Data Fetch Reliability (akshare NAV) | v1.1 | 0/? | Not started | - |
 | 7. Planning Docs & Hygiene Reconciliation | v1.1 | 0/? | Not started | - |
