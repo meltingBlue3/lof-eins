@@ -21,6 +21,23 @@ from pathlib import Path
 from typing import Dict, List
 
 
+# The six values permitted by the subscription_restrictions.restriction_type
+# CHECK constraint in src/data/downloader.py. Keep the two definitions in
+# step -- if the database constraint is ever widened, this constant must be
+# updated in the same change, or build_limit_events()/validate() will start
+# rejecting legitimate new restriction types.
+KNOWN_RESTRICTION_TYPES = frozenset(
+    {
+        "amount_limit",
+        "full_suspension",
+        "holiday_suspension",
+        "pre_holiday_suspension",
+        "application_invalid",
+        "rule_change",
+    }
+)
+
+
 class ValidationBlockedError(RuntimeError):
     """Raised by postprocess() when validate() reports one or more issues.
 
@@ -192,6 +209,19 @@ def build_limit_events(records: List[dict]) -> List[dict]:
                 limit = r.get("limit_amount")
                 rtype = r.get("restriction_type", "")
 
+                # Fail loud on an unrecognised non-empty restriction_type
+                # (D-06 item 5) instead of silently falling through to the
+                # default zero-amount branch below as though it were a
+                # known suspension type. None/empty is the "unspecified"
+                # case -- 32 production records carry it after
+                # fix_resume_type() runs -- and must NOT be treated as
+                # unknown.
+                if rtype and rtype not in KNOWN_RESTRICTION_TYPES:
+                    raise ValueError(
+                        f"未知 restriction_type: {rtype!r} "
+                        f"(fund_code={fund}, effective_date={r['effective_date']})"
+                    )
+
                 # Holiday/application_invalid are inherently single-day;
                 # never pair them with a distant resume
                 if rtype in ("holiday_suspension", "application_invalid"):
@@ -220,6 +250,15 @@ def build_limit_events(records: List[dict]) -> List[dict]:
 
                     if not found_resume and not end:
                         end = None  # Open-ended → NULL in limit_events
+
+                # Inverted-interval clamp: a non-holiday resume sharing the
+                # suspend/restrict's effective_date computes end = start - 1
+                # day above, which runs backwards. Clamp to a single-day
+                # interval instead of emitting a corrupt range -- 7 such
+                # backwards intervals exist in current production output.
+                # The NULL open-ended case is left untouched.
+                if end is not None and end < start:
+                    end = start
 
                 # Determine max_amount for limit_events
                 if r["action"] == "suspend" or rtype in (
@@ -332,6 +371,19 @@ def validate(records: List[dict]) -> List[str]:
 
     for fund, fund_records in by_fund.items():
         fund_records.sort(key=lambda r: r["effective_date"])
+
+        # Check: non-empty restriction_type outside the known allowlist
+        # (mirrors the fail-loud check in build_limit_events()). This lets
+        # postprocess() block a run with an actionable message before
+        # build_limit_events()'s ValueError is ever reached. None/empty is
+        # the "unspecified" case and is intentionally not flagged here.
+        for r in fund_records:
+            rtype = r.get("restriction_type")
+            if rtype and rtype not in KNOWN_RESTRICTION_TYPES:
+                issues.append(
+                    f"  {fund} {r['effective_date']} {r['action']} "
+                    f"未知的 restriction_type: {rtype}"
+                )
 
         # Check: restrict/suspend should have resume (non-holiday)
         open_restrictions = []
