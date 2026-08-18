@@ -133,6 +133,10 @@ None — no external service configuration required.
 - The D-06 regression matrix (`TestBuildLimitEventsRegression`) directly guards `write_limit_events()`'s generated `is_open_ended` column via a real write/read cycle, which plan 04-03 explicitly rebuilds when it introduces the staging-table swap — this test will need to keep passing through that change.
 - The one pre-existing test failure (`tests/test_open_ended_limits.py::TestOpenEndedLimits::test_overlapping_limits_last_one_wins`) remains the sole baseline failure — confirmed unchanged by `python -m unittest discover tests` (`grep -cE "^(FAIL|ERROR): "` returns 1), out of scope per REQUIREMENTS and escalated in plan 04-04 as planned.
 
+## Self-Check: PASSED
+
+All created/modified files verified present on disk (`src/data/postprocess.py`, `tests/test_postprocess.py`, this SUMMARY.md). All four commit hashes (`80f5595`, `8757c57`, `a2532ee`, `5c5ae14`) verified present in git log.
+
 ---
 *Phase: 04-postprocess-pipeline-hardening*
 *Completed: 2026-08-18*
