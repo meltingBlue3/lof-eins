@@ -22,23 +22,21 @@ The enhancement addresses critical gaps in the current system: handling open-end
 - ✓ Tiered fee calculation for subscription/redemption — existing
 - ✓ DataLoader for loading and aligning multiple data sources — existing
 
+- ✓ Fix DataLoader to handle NULL end_date (open-ended limits) — done, Phase 1 (v1.0)
+- ✓ Parse PDF announcements using an LLM to extract limit information — done, but delivered as an async Kimi K2.5 cloud pipeline (`src/data/llm_client.py`, April 2026 rewrite), not the originally-planned local Ollama client
+- ✓ Support four announcement types (complete interval, open-start, end-only resume, end-only extend) — done, via `src/data/postprocess.py::build_limit_events()` state machine, not the originally-planned `LimitEventTimelineBuilder` class
+- ✓ Timeline integration algorithm to merge overlapping limit periods — done, same module as above; includes a holiday-resume-vs-real-resume distinction and synthetic pre-data-range suspend intervals discovered necessary after a real production bug (commit `89830c8`)
+- ✓ Populate real limit data into fund_status.db from parsed announcements — done, `scripts/parse_announcements.py` runs extraction + postprocess end-to-end
+- ✓ Backtest correctly applies purchase limits when generating trading signals — done, verified via `89830c8` bugfix (limit gaps were producing phantom trades and ~7x PnL inflation before the fix)
+
 ### Active
 
-- [ ] **LIM-01**: Fix DataLoader to handle NULL end_date (open-ended limits)
-- [ ] **LIM-02**: Parse PDF announcements using local LLM to extract limit information
-- [ ] **LIM-03**: Support four announcement types: complete interval, open-start, end-only (resume), end-only (extend)
-- [ ] **LIM-04**: Implement timeline integration algorithm to merge overlapping limit periods
-- [ ] **LIM-05**: Create announcement_parses table to store raw LLM extraction results
-- [ ] **LIM-06**: Update limit_events schema to properly support open-ended limits
-- [ ] **LIM-07**: Add event sourcing log for debugging and auditing limit changes
-- [ ] **LIM-08**: Populate real limit data into fund_status.db from parsed announcements
-- [ ] **LIM-09**: Ensure backtest correctly applies purchase limits when generating trading signals
-- [ ] **LIM-10**: Add validation to detect gaps or conflicts in limit timeline
+*(none carried forward as v1.0 — see Current Milestone below for v1.1 scope)*
 
 ### Out of Scope
 
 - Real-time announcement monitoring — focused on historical backtesting only
-- Automatic LLM model fine-tuning — use existing local LLM (Ollama)
+- Automatic LLM model fine-tuning — use existing LLM providers as-is
 - Multi-language announcement support — Chinese announcements only
 - Non-LOF fund types — LOF funds only
 - Live trading integration — backtesting only
@@ -49,55 +47,81 @@ The enhancement addresses critical gaps in the current system: handling open-end
 ### Technical Environment
 
 - **Language**: Python 3.9+
-- **Database**: SQLite (fund_status.db, announcement_parses)
-- **Data Storage**: Parquet files for time-series data, CSV for configs
-- **External APIs**: JoinQuant (market data), Eastmoney (announcements)
-- **LLM**: Local deployment via Ollama (qwen2.5 or similar)
-- **PDF Processing**: pdfplumber or PyPDF2 for text extraction
+- **Database**: SQLite (`fund_status.db`: `limit_events`, `subscription_restrictions`, `announcement_parses`, `limit_event_log`)
+- **Data Storage**: Parquet files for time-series data (market, NAV), CSV for fee configs
+- **External APIs**: JoinQuant (market OHLCV), akshare (NAV, since the April 2026 rewrite — JoinQuant's finance API has row limits), Eastmoney (announcement PDFs), Kimi K2.5 / Moonshot (LLM extraction, cloud, async file-upload + chat API)
+- **LLM**: Currently hardcoded to Kimi K2.5 cloud API (`src/data/llm_client.py`); v1.1 restores the dual-provider design (any OpenAI-compatible endpoint via `base_url`, or local Ollama)
+- **PDF Processing**: pdfplumber (`src/data/pdf_extractor.py`, still used standalone) for local text extraction; Kimi's file-upload API for cloud extraction
 
-### Current State
+### Current State (as of v1.1 planning, 2026-08-18)
 
-The existing codebase has a solid foundation:
+The pipeline is fully built and in production use — this is a working system, not a gap-filling exercise:
 - `AnnouncementDownloader`: Downloads PDFs from Eastmoney API
-- `RealDataDownloader`: Fetches market and NAV data from JoinQuant
-- `DataLoader`: Loads and aligns market, NAV, and limit data
-- `BacktestEngine`: Runs arbitrage strategy simulation
+- `RealDataDownloader`: Fetches market OHLCV from JoinQuant, NAV from akshare
+- `LLMClient` + `AnnouncementProcessor`: Async concurrent Kimi K2.5 extraction with resumable progress tracking
+- `postprocess.py`: Dedupes/pairs suspend↔resume events into `limit_events` intervals
+- `DataLoader` + `BacktestEngine`: Loads aligned data, simulates T+2 settlement with purchase limits applied
 
-However, there's a critical gap: **downloaded PDFs are never parsed**, and the `fund_status.db` remains empty for real data.
+The v1.0 roadmap's Phase 3/4 design (a `LimitEventTimelineBuilder` class in `src/data/timeline_builder.py`) was never built as specified — the equivalent functionality shipped in April 2026 as `src/data/postprocess.py`, with a different (state-machine) design, outside the tracked GSD phase process. `README.md`/`TECHNICAL_PROPOSAL.md` still describe the original Ollama-based design and don't mention `postprocess.py` or akshare — this is what v1.1 corrects.
 
-### User Workflow
+A real production bug (commit `89830c8`) was found and fixed post-hoc in `postprocess.py`: holiday-resume announcements were incorrectly closing long-term suspensions, and funds suspended before the data collection window had no synthetic suspend record — together these inflated backtest PnL ~7x. The fix shipped with **no regression tests**, which is the top risk this milestone addresses.
 
-1. Run `download_lof.py` to get market/NAV data
-2. Run `download_announcements.py` to get PDF announcements
-3. **NEW**: Run `process_announcements.py` to extract limits via LLM
-4. **NEW**: Timeline integration merges and stores limit events
-5. Run `run_backtest.py` with accurate limit data
+### Known Issues to Address (v1.1)
 
-### Known Issues to Address
-
-1. `loader.py` line 224: NULL end_date causes incorrect mask calculation
-2. `downloader.py` line 276: Schema inconsistency (nullable vs NOT NULL)
-3. No module exists for PDF → limit event extraction
-4. No timeline merging logic for overlapping announcements
+See `.planning/codebase/CONCERNS.md` (refreshed 2026-08-18) for the full audit. Highlights:
+1. `src/data/postprocess.py` has zero dedicated unit tests, including for the `89830c8` fix itself
+2. `_is_holiday_resume()` classifies by filename substring match — same fragile-heuristic shape as the bug it patched
+3. `validate()` detects data-quality anomalies but never blocks a write
+4. `write_limit_events()` does a blind `DROP TABLE` + rewrite with no backup/transaction safety
+5. No retry/backoff on Kimi API calls or akshare NAV fetches; akshare has no rate limiting or schema-drift guard
+6. `requirements.txt`/`.env.example` reference the old Ollama-only setup and are missing `akshare`/`KIMI_API_KEY`
 
 ## Constraints
 
 - **Tech Stack**: Must use existing Python infrastructure, cannot switch to different language
-- **Timeline**: Complete within 2 weeks (8-12 days estimated)
-- **Budget**: Use free/local tools only (Ollama for LLM, no cloud API costs)
+- **Compatibility**: v1.1 must not change existing business behavior (bug fixes excepted) — this is a stabilization/refactor milestone, not a feature milestone
 - **Dependencies**: Minimize new dependencies, prefer existing packages
-- **Compatibility**: Must maintain backward compatibility with existing mock data workflow
-- **Data Privacy**: Process PDFs locally, no external LLM APIs for sensitive financial documents
+- **LLM Providers**: Support at least one cloud OpenAI-compatible API (Kimi and others) and local Ollama; Ollama cannot use Kimi's file-upload API, so it needs a local-PDF-text-extraction fallback path
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Use NULL for open-ended limits | Industry standard (Oracle, PostgreSQL temporal tables), semantically clear | — Pending |
-| Event sourcing pattern | Immutable announcement_parses table enables audit trail and reprocessing | — Pending |
-| Local LLM (Ollama) vs Cloud API | Cost control, data privacy, offline capability | — Pending |
-| Three-table schema (parses/events/log) | Separation of concerns: raw data, integrated timeline, audit trail | — Pending |
-| O(n log n) merge algorithm | Optimal complexity for interval merging, well-established pattern | — Pending |
+| Use NULL for open-ended limits | Industry standard (Oracle, PostgreSQL temporal tables), semantically clear | Shipped, v1.0 |
+| Event sourcing pattern | Immutable `subscription_restrictions`/`announcement_parses` enables audit trail and reprocessing | Shipped, v1.0 |
+| Async Kimi K2.5 cloud API replacing local Ollama | Extraction accuracy and throughput; file-upload API avoids local PDF-parsing edge cases | Shipped, April 2026 (commit `4cc5212`) — v1.1 restores provider choice on top of this |
+| akshare replacing JoinQuant for NAV | JoinQuant's finance API has row limits that blocked full-universe NAV downloads | Shipped, April 2026 (commit `4cc5212`) |
+| Hand-rolled state machine for suspend/resume pairing (`postprocess.py`) instead of the originally-planned `LimitEventTimelineBuilder` | Emerged organically while wiring the Kimi rewrite; not a deliberate architectural choice | Shipped, but under-tested — v1.1 hardens this |
+| O(n log n) merge algorithm | Optimal complexity for interval merging, well-established pattern | Shipped, v1.0 |
+
+## Current Milestone: v1.1 Stabilization & Refactor
+
+**Goal:** Stabilize the announcement-parsing pipeline (its highest-risk module, `postprocess.py`, shipped a 7x-PnL-inflation bug with no regression tests), restore multi-provider LLM support, improve data-fetch reliability, and correct the planning docs to match actual code.
+
+**Target features:**
+- Reconcile PROJECT.md/ROADMAP.md with actual shipped architecture (old Phase 3/4 design superseded by `postprocess.py`)
+- `LLMClient` dual-provider support: any OpenAI-compatible cloud API (Kimi, others) via `base_url`, or local Ollama, with a local-PDF-text-extraction fallback for providers without file-upload support
+- `postprocess.py` test coverage for the suspend/resume state machine, `validate()` promoted to a hard gate that can block bad writes, `write_limit_events()` made transaction-safe (no more blind drop+rewrite)
+- Retry/backoff for LLM API calls; rate limiting and schema-drift guards for akshare NAV fetches
+- Clean up `requirements.txt`/`.env.example`; update `README.md`/`TECHNICAL_PROPOSAL.md` to reflect the real pipeline
+- No new user-facing features; no behavior changes except bug fixes
+
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `/gsd-transition`):
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+5. "What This Is" still accurate? → Update if drifted
+
+**After each milestone** (via `/gsd-complete-milestone`):
+1. Full review of all sections
+2. Core Value check — still the right priority?
+3. Audit Out of Scope — reasons still valid?
+4. Update Context with current state
 
 ---
-*Last updated: 2026-02-06 after technical proposal review*
+*Last updated: 2026-08-18 — milestone v1.1 started*
