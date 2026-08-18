@@ -426,7 +426,7 @@ def validate(records: List[dict]) -> List[str]:
                 if r.get("restriction_type") not in ("holiday_suspension",):
                     open_restrictions.append(r)
             elif r["action"] == "resume":
-                if open_restrictions:
+                if open_restrictions and not _is_holiday_resume(r):
                     open_restrictions.pop()
 
         for r in open_restrictions:

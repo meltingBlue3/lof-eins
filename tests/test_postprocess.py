@@ -373,6 +373,51 @@ class TestEmptyInput(PostprocessDBTestCase):
         self.assertEqual(before, after)
 
 
+class TestValidateHolidayResumeStaleness(PostprocessDBTestCase):
+    """CR-02 regression: validate()'s staleness check must not treat a
+    holiday resume as closing a long-term suspension -- build_limit_events()
+    doesn't, and the two must agree or the validation gate can wave through
+    a suspension it should have caught as stale."""
+
+    def test_holiday_resume_does_not_close_a_stale_long_term_suspension(self):
+        now = datetime.now()
+        eff = now - timedelta(days=400)
+        ann = eff - timedelta(days=1)
+        holiday_resume_date = eff + timedelta(days=5)
+        records = [
+            {
+                "fund_code": "161129",
+                "announcement_date": ann.strftime("%Y-%m-%d"),
+                "effective_date": eff.strftime("%Y-%m-%d"),
+                "action": "suspend",
+                "restriction_type": "full_suspension",
+                "source_file": "a.pdf",
+            },
+            {
+                "fund_code": "161129",
+                "announcement_date": holiday_resume_date.strftime("%Y-%m-%d"),
+                "effective_date": holiday_resume_date.strftime("%Y-%m-%d"),
+                "action": "resume",
+                "restriction_type": "holiday_suspension",
+                "source_file": "b.pdf",
+            },
+        ]
+
+        # build_limit_events() must still treat this suspension as open
+        # (holiday resumes never close a long-term suspension).
+        events = build_limit_events(records)
+        self.assertEqual(len(events), 1)
+        self.assertIsNone(events[0]["end_date"])
+
+        # validate() must agree and flag it as stale rather than letting a
+        # holiday resume silently close it.
+        issues = validate(records)
+        self.assertTrue(
+            any("161129" in i and "无对应resume" in i for i in issues),
+            f"expected a staleness finding for 161129, got: {issues}",
+        )
+
+
 class TestZeroIntervalGuard(PostprocessDBTestCase):
     """CR-01 regression: non-empty subscription_restrictions that derive
     zero limit_events intervals must block the write rather than silently
