@@ -608,5 +608,165 @@ class TestIntervalOrdering(PostprocessDBTestCase):
         self.assertEqual(records[1]["action"], "resume")
 
 
+class TestBuildLimitEventsRegression(PostprocessDBTestCase):
+    """D-06 scenario matrix, pinning the two commit 89830c8 state-machine
+    defects (which together inflated backtest PnL ~7x) plus the surrounding
+    happy-path/edge cases so neither can regress undetected again."""
+
+    def test_normal_suspend_resume_pairing(self):
+        """Scenario 1, happy-path anchor: ordinary restrict->resume pairing
+        must be unaffected by anything else changed in this phase."""
+        records = [
+            {
+                "fund_code": "160105",
+                "effective_date": "2022-01-14",
+                "end_date": None,
+                "action": "restrict",
+                "restriction_type": "amount_limit",
+                "limit_amount": 1000000,
+                "reason": "保护持有人",
+                "source_file": "a.pdf",
+            },
+            {
+                "fund_code": "160105",
+                "effective_date": "2022-01-19",
+                "action": "resume",
+                "restriction_type": "amount_limit",
+                "source_file": "b.pdf",
+            },
+        ]
+        events = build_limit_events(records)
+        self.assertEqual(len(events), 1)
+        ev = events[0]
+        self.assertEqual(ev["start_date"], "2022-01-14")
+        self.assertEqual(ev["end_date"], "2022-01-18")
+        self.assertEqual(ev["max_amount"], 1000000)
+
+    def test_holiday_resume_mid_suspension_does_not_close_it(self):
+        """Scenario 2, regression test for commit 89830c8 defect 1: a
+        holiday resume in the middle of a long-term suspension must not
+        terminate it. Before the fix this produced an interval ending
+        2022-02-06, making the fund look purchasable for four months it
+        was actually shut -- the core of the ~7x PnL inflation the commit
+        fixed."""
+        records = [
+            {
+                "fund_code": "161129",
+                "effective_date": "2022-01-10",
+                "end_date": None,
+                "action": "suspend",
+                "restriction_type": "full_suspension",
+                "limit_amount": None,
+                "reason": "主动暂停",
+                "source_file": "a.pdf",
+            },
+            {
+                "fund_code": "161129",
+                "effective_date": "2022-02-07",
+                "action": "resume",
+                "restriction_type": "holiday_suspension",
+                "source_file": "b.pdf",
+            },
+            {
+                "fund_code": "161129",
+                "effective_date": "2022-06-01",
+                "action": "resume",
+                "restriction_type": "full_suspension",
+                "source_file": "c.pdf",
+            },
+        ]
+        events = build_limit_events(records)
+        self.assertEqual(len(events), 1)
+        ev = events[0]
+        self.assertEqual(ev["start_date"], "2022-01-10")
+        self.assertEqual(ev["end_date"], "2022-05-31")
+        self.assertNotEqual(
+            ev["end_date"],
+            "2022-02-06",
+            "89830c8 regression: holiday resume closed the suspension early",
+        )
+
+    def test_missing_prior_suspend_yields_synthetic_interval(self):
+        """Scenario 3, regression test for commit 89830c8 defect 2: a fund
+        whose first non-holiday event is a resume must get a synthetic
+        interval starting 2000-01-01, not be silently dropped as an orphan
+        resume."""
+        records = [
+            {
+                "fund_code": "161129",
+                "effective_date": "2022-03-15",
+                "action": "resume",
+                "restriction_type": "full_suspension",
+                "source_file": "a.pdf",
+            },
+        ]
+        events = build_limit_events(records)
+        self.assertEqual(len(events), 1)
+        ev = events[0]
+        self.assertEqual(ev["start_date"], "2000-01-01")
+        self.assertEqual(ev["end_date"], "2022-03-14")
+        self.assertEqual(ev["max_amount"], 0.0)
+        self.assertIn("synthetic", ev["reason"])
+
+    def test_synthetic_interval_survives_leading_holiday_resume(self):
+        """Scenario 3b: the two commit 89830c8 fixes must compose. A
+        leading holiday resume must not be mistaken for the "first event"
+        that decides whether a synthetic interval is needed."""
+        records = [
+            {
+                "fund_code": "161129",
+                "effective_date": "2022-01-31",
+                "action": "resume",
+                "restriction_type": "holiday_suspension",
+                "source_file": "z.pdf",
+            },
+            {
+                "fund_code": "161129",
+                "effective_date": "2022-03-15",
+                "action": "resume",
+                "restriction_type": "full_suspension",
+                "source_file": "a.pdf",
+            },
+        ]
+        events = build_limit_events(records)
+        self.assertEqual(len(events), 1)
+        ev = events[0]
+        self.assertEqual(ev["start_date"], "2000-01-01")
+        self.assertEqual(ev["end_date"], "2022-03-14")
+
+    def test_unmatched_open_ended_suspend_round_trips_as_null(self):
+        """Scenario 4: a suspend with no matching resume anywhere in the
+        stream must produce an open interval (NULL end_date), never be
+        silently dropped, and that NULL must survive a real write/read
+        cycle against the temp database with the generated open-ended
+        flag set. This also guards the generated-column definition that
+        plan 04-03 rebuilds when it introduces the staging table."""
+        records = [
+            {
+                "fund_code": "168102",
+                "effective_date": "2022-12-20",
+                "end_date": None,
+                "action": "suspend",
+                "restriction_type": "full_suspension",
+                "limit_amount": None,
+                "reason": "主动暂停",
+                "source_file": "d.pdf",
+            },
+        ]
+        events = build_limit_events(records)
+        self.assertEqual(len(events), 1)
+        ev = events[0]
+        self.assertIsNone(ev["end_date"])
+        self.assertEqual(ev["max_amount"], 0.0)
+
+        write_limit_events(self.db_path, events)
+        rows = self._read_limit_events()
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        # id, ticker, start_date, end_date, max_amount, reason, source_announcement_ids, is_open_ended
+        self.assertIsNone(row[3])
+        self.assertEqual(row[7], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
