@@ -768,5 +768,188 @@ class TestBuildLimitEventsRegression(PostprocessDBTestCase):
         self.assertEqual(row[7], 1)
 
 
+class TestAtomicSwap(PostprocessDBTestCase):
+    """T-04-06/07/08/11: write_limit_events() stages every row into
+    limit_events_new inside one transaction and only replaces the live
+    table after the final insert succeeds. A forced mid-write failure
+    (a real NOT NULL constraint violation, no mocking library, per D-07)
+    must leave the previously-written limit_events rows byte-identical,
+    leave no staging-table residue, re-raise, and not wedge the database
+    against the next run."""
+
+    @staticmethod
+    def _two_seed_rows():
+        return [
+            {
+                "ticker": "160105",
+                "start_date": "2022-01-01",
+                "end_date": "2022-01-05",
+                "max_amount": 0.0,
+                "reason": "seed-1",
+                "source_announcement_ids": "[]",
+            },
+            {
+                "ticker": "160216",
+                "start_date": "2022-02-01",
+                "end_date": None,
+                "max_amount": 500000.0,
+                "reason": "seed-2",
+                "source_announcement_ids": "[]",
+            },
+        ]
+
+    @staticmethod
+    def _mid_write_failure_events():
+        """First entry is a well-formed interval; second sets start_date to
+        None, which the NOT NULL constraint on that column rejects at
+        insert time -- the real constraint violation that forces the
+        mid-write failure, per D-07 (no mocking library)."""
+        return [
+            {
+                "ticker": "888888",
+                "start_date": "2023-01-01",
+                "end_date": "2023-01-05",
+                "max_amount": 100000.0,
+                "reason": "valid",
+                "source_announcement_ids": "[]",
+            },
+            {
+                "ticker": "999999",
+                "start_date": None,
+                "end_date": None,
+                "max_amount": 0.0,
+                "reason": "invalid - null start_date",
+                "source_announcement_ids": "[]",
+            },
+        ]
+
+    def test_mid_write_failure_leaves_previous_rows_intact_and_reraises(self):
+        self._seed_limit_events(self._two_seed_rows())
+        before = self._read_limit_events()
+        self.assertEqual(len(before), 2)
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            write_limit_events(self.db_path, self._mid_write_failure_events())
+
+        after = self._read_limit_events()
+        self.assertEqual(
+            len(after),
+            2,
+            "a crashed write destroyed the last known-good limit_events dataset",
+        )
+        self.assertEqual(
+            [r[1] for r in before],
+            [r[1] for r in after],
+            "a crashed write altered the ticker values of the previously-written rows",
+        )
+        self.assertEqual(
+            before,
+            after,
+            "a crashed write altered the previously-written rows",
+        )
+
+    def test_mid_write_failure_leaves_no_staging_table_residue(self):
+        self._seed_limit_events(self._two_seed_rows())
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            write_limit_events(self.db_path, self._mid_write_failure_events())
+
+        tables = self._table_names()
+        self.assertIn("limit_events", tables)
+        self.assertNotIn(
+            "limit_events_new",
+            tables,
+            "staging table lingered after a failed write and could collide "
+            "with, or silently seed, the next run",
+        )
+
+    def test_valid_write_after_failed_write_succeeds_and_replaces(self):
+        self._seed_limit_events(self._two_seed_rows())
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            write_limit_events(self.db_path, self._mid_write_failure_events())
+
+        good_events = [
+            {
+                "ticker": "160105",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-05",
+                "max_amount": 200000.0,
+                "reason": "recovered",
+                "source_announcement_ids": "[]",
+            },
+        ]
+        write_limit_events(self.db_path, good_events)
+
+        rows = self._read_limit_events()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][1], "160105")
+        self.assertEqual(rows[0][5], "recovered")
+
+    def test_successful_write_against_fresh_database_creates_indexes(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("DROP TABLE limit_events")
+        conn.commit()
+        conn.close()
+        self.assertNotIn("limit_events", self._table_names())
+
+        write_limit_events(
+            self.db_path,
+            [
+                {
+                    "ticker": "160105",
+                    "start_date": "2022-01-01",
+                    "end_date": None,
+                    "max_amount": 0.0,
+                    "reason": "fresh",
+                    "source_announcement_ids": "[]",
+                }
+            ],
+        )
+
+        self.assertIn("limit_events", self._table_names())
+        conn = sqlite3.connect(self.db_path)
+        indexes = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='limit_events'"
+            ).fetchall()
+        }
+        conn.close()
+        self.assertIn("idx_limit_events_ticker", indexes)
+        self.assertIn("idx_limit_events_is_open_ended", indexes)
+
+    def test_two_successive_successful_writes_hold_exactly_second_calls_rows(self):
+        write_limit_events(
+            self.db_path,
+            [
+                {
+                    "ticker": "A",
+                    "start_date": "2022-01-01",
+                    "end_date": "2022-01-02",
+                    "max_amount": 100.0,
+                    "reason": "first",
+                    "source_announcement_ids": "[]",
+                }
+            ],
+        )
+        write_limit_events(
+            self.db_path,
+            [
+                {
+                    "ticker": "B",
+                    "start_date": "2023-01-01",
+                    "end_date": None,
+                    "max_amount": 0.0,
+                    "reason": "second",
+                    "source_announcement_ids": "[]",
+                }
+            ],
+        )
+        rows = self._read_limit_events()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][1], "B")
+
+
 if __name__ == "__main__":
     unittest.main()
