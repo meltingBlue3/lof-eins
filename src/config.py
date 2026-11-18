@@ -36,7 +36,7 @@ class BacktestConfig:
             'same_day' uses the T NAV, which is only published after the close (look-ahead).
             / 决策溢价：published 用决策时可见的最新净值，same_day 用 T 日净值（有前视偏差）
         fees: 'fund' uses each fund's own subscription fee tiers (fund_terms.csv) where known;
-            'default' uses fees.csv / 1.5% for every fund. / 申购费率来源
+            'default' uses 1.5% (DEFAULT_FEES) for every fund. / 申购费率来源
         settlement: 'fund' sells subscribed shares on each fund's own sell day (QDII T+3);
             't2' sells every fund at T+2. / 份额可卖日
         fee_discount: Multiplier on percentage subscription fees (1.0 = prospectus rate, 0.1 = 10%

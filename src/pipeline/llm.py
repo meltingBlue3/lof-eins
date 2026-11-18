@@ -13,8 +13,7 @@ Configuration (`.env` at the project root, never committed):
     LOF_LLM_TIMEOUT    optional seconds per request (default 120)
     LOF_LLM_MAX_RETRIES optional (default 4)
 
-The prefix keeps these apart from the legacy Kimi client's settings and from any
-OPENAI_* variables in the user's shell.
+The prefix keeps these apart from any OPENAI_* variables in the user's shell.
 """
 
 import json

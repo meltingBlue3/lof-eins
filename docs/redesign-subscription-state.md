@@ -1,6 +1,6 @@
 # 重构方案：申购状态时间线（v2）
 
-> 日期：2026-11-18 · 状态：草案，待确认
+> 日期：2026-11-18 · 状态：阶段 A~G 已实施（2026-11-19）；待你确认的事项见 §11
 > 范围：替换"公告解析 → `subscription_restrictions` → `postprocess.py` → `limit_events` → `DataLoader`"这条链路，并修正回测侧会直接影响结论的几处问题。
 
 ---
@@ -226,7 +226,7 @@ flowchart LR
 
 ### 6.2 正文提取
 
-- 以本地 pdfplumber 为主（在现有 [pdf_extractor.py](../src/data/pdf_extractor.py) 基础上扩展），不再依赖 Kimi 的文件接口。原因有三：任意 OpenAI 兼容模型都能用；正文要拿来校验原文引用；缓存可复现。
+- 以本地 pdfplumber 为主（实现在 [src/pipeline/texts.py](../src/pipeline/texts.py)；原先的 `pdf_extractor.py` 已在阶段 G 删除），不再依赖 Kimi 的文件接口。原因有三：任意 OpenAI 兼容模型都能用；正文要拿来校验原文引用；缓存可复现。
 - 公告首页基本都是"公告基本信息"表格，pdfplumber 会把单元格文字打散（比如"恢 复相 关"）。可以同时输出 `extract_tables()` 的结果作为第二份上下文。
 - 对提取为空的扫描件，标记 `is_empty`，进入人工或 OCR 队列，不要静默跳过。
 - **小字号页面**（2026-11-18 全量抽取时发现）：有的管理人把整份公告连同表格排在一页 A4 上，正文字号只有 2～4pt。pdfplumber 默认 3pt 的字符合并容差比一个字还宽，相邻列会被拼成"份金 基起日市"这样的乱码，506008 的开放期公告就因此连续超时。现在容差取该页中位字号的 0.4 倍（上限 3pt，下限 0.5pt），9pt 以上的正常页面输出不变。215 份小字号公告里，有 166 份的正文因此变得可读。提取器版本记为 `pdfplumber@<ver>+fonttol`，刷新命令是 `build_corpus.py texts --refresh`。
@@ -431,7 +431,7 @@ def resolve_day(d, changes, overlays, restatements):
 - `BacktestConfig` 新增 `unknown_policy: closed | open`（默认 `closed`）和 `n_accounts: 1`。
 
 **阶段 E 实际实现**（2026-11-18）：
-- **Loader**（`DataLoader(limits="auto" | "daily_status" | "legacy")`）不做任何策略判断。它只给出 `sub_status`、`status_source` 和原文写明的限额 `daily_limit`；没有数字时（unknown，或金额不明的限额）为 NaN，并且不做前向填充。`auto` 在有 `daily_status` 表时用它，否则用旧的 `limit_events`；模拟数据和旧链路评估走后者，阶段 G 再一起改。
+- **Loader**（`DataLoader(limits="auto" | "daily_status" | "legacy")`；阶段 G 删除了 `limits` 参数，只读 `daily_status`）不做任何策略判断。它只给出 `sub_status`、`status_source` 和原文写明的限额 `daily_limit`；没有数字时（unknown，或金额不明的限额）为 NaN，并且不做前向填充。`auto` 在有 `daily_status` 表时用它，否则用旧的 `limit_events`；模拟数据和旧链路评估走后者，阶段 G 再一起改。
 - **引擎**（`effective_daily_limit`）按策略换算。"不能证明可申购"的日子包括三种：unknown、金额不明的限额、只是推断出来的宽松状态（`inferred_open`，以及非 closed 的 `inferred_prior`）。`closed` 策略下这些日子一律不买；`open` 策略下 NaN 当作不限购，推断出的限额沿用它的金额。限额乘以 `n_accounts`。
 - **`--bounds`**：除非指定 `-s`，从状态库里的第一份公告（2022-01-04）开始，因为在那之前每天都是 unknown。报告给出两个边界的指标，按买入日 `status_source` 归因，并给出买在红旗区间内的利润占比。
 
@@ -475,7 +475,7 @@ def resolve_day(d, changes, overlays, restatements):
 | **D 时间线** ✅ 待复核红旗 | 匹配、解析、冲突检测、物化 | `src/pipeline/timeline.py`、`scripts/build_timeline.py`、`daily_status`、`anomalies`、[对照金标](eval/v2-timeline.md)、[覆盖率](eval/timeline-report.md)、[红旗](eval/v2-red-flags.md) | 金标逐日一致率 ≥ 98%：有答案的 12,192 天中一致 99.65%（high 置信度 99.5%）。另有 2,626 天为 unknown 或金额不明：162207、169201 语料里没有任何公告；162411、164701 的首条限额被抽成 `prior_status=limited`。金额一致率 ≥ 95%：99.8%（已达成）。相关日过松 0 天（旧数据 376 天）。红旗从 64 只基金、492 个基金日降到 24 只、136 个，剩下的都是国内或港股通 LOF，语料里查不到漏掉的限额公告，待人工确认为市场原因 |
 | **E 回测接入** ✅ 行情刷新待定 | Loader 替换、`unknown_policy`、`n_accounts`、双边界、归因、窗口对齐（含行情刷新） | Loader 和 Engine 改动、`run_backtest.py --bounds`、[双边界报告](eval/bounds-2022-2024.md) | 同一缓存重跑结果一致（已达成：两次重跑逐字节相同）；报告含两个边界和归因（已达成）。2022-01-04 ~ 2024-12-31：保守 +3.9%、乐观 +165%，旧数据 +7,585%。剩余：行情和净值刷新到 2026（需要 JoinQuant 账号，§11 #5） |
 | **F 时序与成本** ✅ 费率折扣待核实 | 决策溢价、到账天数、真实费率 | `src/data/fund_terms.py`、`scripts/fund_terms.py`、`config/fund_terms.csv`、Loader 和 Engine 改动、`run_backtest.py --sensitivity`、[条款报告](eval/fund-terms.md)、[敏感性报告](eval/phase-f-sensitivity.md) | 前视偏差的敏感性分析写入报告（已达成）。按招募说明书费率，保守边界 −46.0%（用 T 日净值也只有 −8.4%），乐观边界 +64.6%，剔除红旗后每笔约为 0。申购费打 1 折时保守边界 +381%，剔除红旗后每笔仍 +0.54%，所以结论取决于场内申购实际能拿到的费率 |
-| **G 清理** | 删除旧链路，更新文档 | — | 全量测试通过；README 描述新链路 |
+| **G 清理** ✅ | 删除旧链路，更新文档 | 模拟数据改写 `daily_status`，Loader 只读 `daily_status` 和 `fund_terms.csv`，删除旧模块、脚本和测试，Streamlit 显示状态时间线，README 重写 | 全量测试通过（已达成）；README 描述新链路（已达成） |
 
 阶段 A 不依赖其他阶段，应该最先做：旧项目失败的一大原因就是一直没有可量化的标准。B 和 A 可以并行。C 依赖 A 和 B。
 
@@ -483,16 +483,17 @@ def resolve_day(d, changes, overlays, restatements):
 
 ## 10. 现有代码与路线图的处置
 
-| 对象 | 处置 |
-|---|---|
-| `src/data/postprocess.py`、`tests/test_postprocess.py` | 由 `src/pipeline/timeline.py` 取代，阶段 G 删除 |
-| `src/data/announcement_processor.py` | 标题过滤和追加写入去掉；进度跟踪逻辑可复用到阶段 B、C |
-| `src/data/llm_client.py` | 新客户端另写在 `src/pipeline/llm.py`（OpenAI 兼容、env 配置、tool calling、重试）；旧的 Kimi 客户端原样保留，让旧链路和它的测试在迁移期还能跑，阶段 G 删除 |
-| `src/data/pdf_extractor.py` | 保留，扩展表格输出 |
-| `DataLoader._resample_limits_to_daily` 和 `tests/test_open_ended_limits.py` | 按新语义重写 |
-| `src/data/generator/`（mock） | 改为生成 `daily_status`，保证 mock 路径仍可用 |
-| `app/`（Streamlit） | 数据浏览页改为显示状态时间线和来源 |
-| 表 `limit_events` / `subscription_restrictions` / `announcement_parses` / `limit_event_log` | 迁移期只读对照，阶段 G 删除 |
+| 对象 | 处置 | 阶段 G 实际结果（2026-11-19） |
+|---|---|---|
+| `src/data/postprocess.py`、`tests/test_postprocess.py` | 由 `src/pipeline/timeline.py` 取代，阶段 G 删除 | 已删除 |
+| `src/data/announcement_processor.py` | 标题过滤和追加写入去掉；进度跟踪逻辑可复用到阶段 B、C | 已删除（阶段 B、C 有自己的进度跟踪），连同 `scripts/parse_announcements.py` 和测试 |
+| `src/data/llm_client.py` | 新客户端另写在 `src/pipeline/llm.py`；旧的 Kimi 客户端在迁移期保留，阶段 G 删除 | 已删除，连同 `prompts/system_prompt.md`、`.env.example` 里的旧配置和 `ollama` 依赖 |
+| `src/data/pdf_extractor.py` | 保留，扩展表格输出 | 改为删除：`src/pipeline/texts.py` 已经取代它（含表格和按字号调整的容差），留两套提取逻辑容易用错 |
+| `DataLoader._resample_limits_to_daily` 和 `tests/test_open_ended_limits.py` | 按新语义重写 | 已删除；新语义由 `tests/test_timeline.py` 和 `tests/test_backtest_status.py` 覆盖。Loader 只读 `daily_status`，没有这张表时每天都是 unknown |
+| `fees.csv` | （原方案未列） | 不再读取也不再生成；费率来自 `fund_terms.csv`，没有时用默认费率 |
+| `src/data/generator/`（mock） | 改为生成 `daily_status`，保证 mock 路径仍可用 | 已改；随机种子改为稳定的 CRC32，模拟数据跨进程可复现 |
+| `app/`（Streamlit） | 数据浏览页改为显示状态时间线和来源 | 已改：状态色带、限额走势、按来源统计；回测页加入 `unknown_policy` 和阶段 F 的参数 |
+| 表 `limit_events` / `subscription_restrictions` / `announcement_parses` / `limit_event_log` | 迁移期只读对照，阶段 G 删除 | 代码不再读写这些表，`scripts/inspect_data.py` 也删了。实盘目录里的 `fund_status.db` 和 `fees.csv` 属于本地数据，没有删，可以自行删除 |
 | GSD v1.1 路线图 | Phase 4（加固 postprocess）被取代；Phase 5（多提供方 LLM、本地 PDF）并入 B、C；Phase 6（akshare 可靠性）在 E 刷新数据时完成；Phase 7（文档）并入 G。建议提前关闭 v1.1，另开 v2.0 里程碑 |
 
 ---

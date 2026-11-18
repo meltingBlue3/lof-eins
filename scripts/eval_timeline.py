@@ -6,7 +6,7 @@ Score a subscription-state timeline against the gold set.
 
 Usage:
     python scripts/eval_timeline.py
-    python scripts/eval_timeline.py --candidate legacy --out docs/eval/legacy-baseline.md \
+    python scripts/eval_timeline.py --out docs/eval/v2-timeline.md \
         --trades output/20260413_154550/trade_logs.csv
     python scripts/eval_timeline.py --min-confidence high
 
@@ -65,7 +65,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data-dir", default=str(PROJECT_ROOT / "data" / "real_all_lof"))
     p.add_argument("--gold", default=str(PROJECT_ROOT / "data" / "gold" / "timeline.csv"))
-    p.add_argument("--candidate", default="legacy", choices=sorted(CANDIDATES))
+    p.add_argument("--candidate", default="v2", choices=sorted(CANDIDATES))
     p.add_argument("--threshold", type=float, default=0.017, help="premium above which a day is arbitrage-relevant")
     p.add_argument("--min-confidence", default="low", choices=CONFIDENCES,
                    help="ignore gold days labeled below this confidence")

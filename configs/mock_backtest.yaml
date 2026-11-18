@@ -1,0 +1,60 @@
+# LOF Backtest Configuration
+# ===========================
+# This file contains the configuration parameters for running backtests.
+# Modify values below to test different strategies and parameters.
+
+# Initial capital (CNY)
+initial_cash: 10000.0
+
+# Minimum premium rate to trigger buy signal (2% = 0.02)
+buy_threshold: 0.017
+
+# Fraction of daily volume that can be traded (10% = 0.1)
+liquidity_ratio: 0.1
+
+# Trading commission rate for sell transactions (0.03% = 0.0003)
+commission_rate: 0.0003
+
+# Position sizing mode: 'fixed' uses available cash, 'infinite' ignores cash constraints
+risk_mode: fixed
+
+# Maximum premium rate to allow buying (null = no upper limit)
+# Set to 0.03 to skip buys when premium > 3%
+max_premium_rate: null
+
+# Use MA5 volume for liquidity calculation
+use_ma5_liquidity: true
+
+# Annual risk-free rate for Sharpe ratio calculation (2% = 0.02)
+risk_free_rate: 0.02
+
+# Timing and costs (redesign §8.4, phase F)
+# Premium the buy decision uses: published = newest NAV visible at the T 15:00 cut-off
+# (T-1, or T-2 for overseas funds); same_day = the T NAV, only published after the close (look-ahead)
+premium_basis: published
+# Subscription fees: fund = each fund's own tiers (config/fund_terms.csv); default = 1.5% for every fund
+fees: fund
+# Sell day of subscribed shares: fund = each fund's own (QDII T+3); t2 = T+2 for every fund
+settlement: fund
+# Multiplier on percentage subscription fees (1.0 = prospectus rate, 0.1 = 10% of it)
+fee_discount: 1.0
+
+# ===========================
+# Runtime parameters (not part of BacktestConfig, read by run_backtest.py)
+# ===========================
+
+# Data source directory (relative or absolute path)
+# - ./data/mock        : Mock data for testing
+# - ./data/real_all_lof: Real data downloaded from JoinQuant
+# data_dir: ./data/real_all_lof   (configs/backtest.yaml uses the real data)
+data_dir: ./data/mock
+
+# Tickers to run backtest on
+# Options:
+# - "all": Auto-discover all tickers from data_dir
+# - List of ticker codes: Run on specific tickers only
+# tickers: all
+# tickers:
+#   - "161810"
+#   - "163417"
+tickers: all

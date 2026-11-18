@@ -40,4 +40,4 @@ nav_volatility: 0.015
 limit_max_amount: 100.0
 
 # Maximum purchase amount during normal period (CNY)
-normal_max_amount: 1000000.0
+normal_max_amount: -1.0

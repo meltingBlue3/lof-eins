@@ -3,11 +3,13 @@ Candidate timelines: the subscription-state data being evaluated.
 
 候选时间线：被评估的限购数据。
 
-- ``legacy``: the ``daily_limit`` column the current DataLoader feeds the backtest,
-  built from the ``limit_events`` table;
 - ``v2``: the redesigned pipeline's ``daily_status`` table (phase D) in
   ``subscription_state.db``. ``unknown`` days, and limits without an amount, have no
   cap, so the comparison counts them as ``cand_unknown``.
+
+The ``legacy`` candidate (the old ``limit_events`` data) was removed in phase G with the
+rest of the old pipeline; its reports (docs/eval/legacy-*.md) were produced at commit
+17a5bfd.
 """
 
 import sqlite3
@@ -29,15 +31,6 @@ def status_from_cap(cap: pd.Series) -> pd.DataFrame:
     status = np.where(np.isinf(cap), "open", np.where(cap <= 0, "closed", "limited"))
     amount = np.where(status == "limited", cap, np.nan)
     return pd.DataFrame({"status": status, "amount": amount}, index=cap.index)
-
-
-def legacy_timeline(bundle_df: pd.DataFrame) -> pd.DataFrame:
-    """The legacy candidate: exactly the ``daily_limit`` the backtest saw.
-
-    Args:
-        bundle_df: ``DataLoader.load_bundle(...).df`` for one fund.
-    """
-    return status_from_cap(bundle_df["daily_limit"])
 
 
 @lru_cache(maxsize=1)
@@ -62,7 +55,6 @@ def v2_timeline(fund_code: str, bundle_df: pd.DataFrame, db_path: str = "") -> p
 
 
 CANDIDATES: Dict[str, Callable[[str, pd.DataFrame], pd.DataFrame]] = {
-    "legacy": lambda fund_code, frame: legacy_timeline(frame),
     "v2": v2_timeline,
 }
 
@@ -77,13 +69,5 @@ def load_fund(loader: DataLoader, fund_code: str, candidate: str) -> Tuple[pd.Da
     """
     if candidate not in CANDIDATES:
         raise ValueError(f"unknown candidate {candidate!r}; choose from {sorted(CANDIDATES)}")
-    if candidate == "legacy" and loader.limits != "legacy":
-        # the legacy candidate is the old limit_events data, whatever the loader defaults to
-        loader = _legacy_loader(str(loader.data_dir))
     frame = loader.load_bundle(fund_code).df
     return frame, CANDIDATES[candidate](fund_code, frame)
-
-
-@lru_cache(maxsize=4)
-def _legacy_loader(data_dir: str) -> DataLoader:
-    return DataLoader(data_dir, limits="legacy")

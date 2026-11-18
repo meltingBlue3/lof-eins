@@ -40,12 +40,11 @@ def gold_funds():
 def trading_days():
     """A-share trading days seen in the market data of the gold funds."""
     from src.data.loader import DataLoader
-    from src.evaluation.candidates import load_fund
 
     loader = DataLoader(str(PROJECT_ROOT / "data" / "real_all_lof"))
     days = set()
     for f in gold_funds():
-        frame, _ = load_fund(loader, f, "legacy")
+        frame = loader.load_bundle(f).df
         days |= {d.strftime("%Y-%m-%d") for d in frame.index}
     return sorted(days)
 

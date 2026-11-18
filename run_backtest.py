@@ -235,8 +235,6 @@ def main() -> None:
         default=False,
         help="Skip CSV export (console-only mode)",
     )
-    parser.add_argument("--limits", choices=["auto", "daily_status", "legacy"], default="auto",
-                        help="subscription status source (default: daily_status when built, else legacy)")
     parser.add_argument("--unknown-policy", choices=["closed", "open"], help="override unknown_policy")
     parser.add_argument("--n-accounts", type=int, help="override n_accounts")
     parser.add_argument("--bounds", action="store_true",
@@ -281,7 +279,7 @@ def main() -> None:
 
     # Initialize data loader with configured directory  # 使用配置的目录初始化数据加载器
     try:
-        data_loader = DataLoader(data_dir=data_dir, limits=args.limits, terms=args.terms)
+        data_loader = DataLoader(data_dir=data_dir, terms=args.terms)
     except FileNotFoundError as e:
         print(f"[ERROR] Data directory error: {e}")
         print(f"[ERROR] Please ensure data exists at: {data_dir}")
@@ -308,7 +306,8 @@ def main() -> None:
     print(f"       buy_threshold:   {config.buy_threshold:.2%}")
     print(f"       liquidity_ratio: {config.liquidity_ratio:.2%}")
     print(f"       risk_mode:       {config.risk_mode}")
-    print(f"       limits:          {data_loader.limits} (unknown_policy={config.unknown_policy}, "
+    print(f"       status:          {'daily_status' if data_loader.has_status else 'none (all unknown)'} "
+          f"(unknown_policy={config.unknown_policy}, "
           f"n_accounts={config.n_accounts})")
     print(f"       terms:           {data_loader.terms_mode} ({terms_line(config)})")
     print(f"       tickers:         {len(tickers)} funds")
@@ -386,7 +385,7 @@ def main() -> None:
 
 def corpus_start(data_loader: DataLoader) -> Optional[str]:
     """First announcement date in the status database: where daily_status stops being all unknown."""
-    if data_loader.limits != "daily_status":
+    if not data_loader.has_status:
         return None
     conn = sqlite3.connect(f"file:{data_loader.status_db.as_posix()}?mode=ro", uri=True)
     try:
@@ -430,7 +429,7 @@ def bounds_report(results: Dict[str, BacktestResult], window: str, data_loader: 
     out = [
         "# 回测双边界报告\n",
         f"- 生成时间：{datetime.now():%Y-%m-%d %H:%M}；对应重构方案 §8.2",
-        f"- 申购状态来源：`{data_loader.limits}`；区间：{window}；基金：{len(tickers)} 只",
+        f"- 申购状态来源：`daily_status`；区间：{window}；基金：{len(tickers)} 只",
         f"- 参数：初始资金 {cfg.initial_cash:,.0f}，买入阈值 {cfg.buy_threshold:.2%}，流动性比例 {cfg.liquidity_ratio:.0%}，"
         f"账户数 {cfg.n_accounts}；单笔申购上限 100,000 元（引擎内置）",
         f"- 交易条款：{terms_line(cfg)}（条款来源 `{data_loader.terms_mode}`）",
@@ -553,7 +552,7 @@ def sensitivity_report(runs: List[tuple], window: str, data_loader: DataLoader, 
     cfg = runs[0][2]
     out = ["# 阶段 F：时序与成本的敏感性\n",
            f"- 生成时间：{datetime.now():%Y-%m-%d %H:%M}；对应重构方案 §8.4",
-           f"- 申购状态来源：`{data_loader.limits}`；交易条款来源：`{data_loader.terms_mode}`；区间：{window}；"
+           f"- 申购状态来源：`daily_status`；交易条款来源：`{data_loader.terms_mode}`；区间：{window}；"
            f"基金：{len(tickers)} 只",
            f"- 参数：初始资金 {cfg.initial_cash:,.0f}，买入阈值 {cfg.buy_threshold:.2%}（另有说明的除外），"
            f"流动性比例 {cfg.liquidity_ratio:.0%}，账户数 {cfg.n_accounts}；单笔申购上限 100,000 元",

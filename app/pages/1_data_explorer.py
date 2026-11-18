@@ -1,4 +1,4 @@
-"""Page 1: LOF 数据看板 — 浏览基金行情、净值和溢价率"""
+"""Page 1: LOF 数据看板 — 浏览基金行情、净值、溢价率和申购状态"""
 
 import streamlit as st
 
@@ -8,6 +8,8 @@ from utils import (
     nav_chart,
     ohlcv_chart,
     premium_chart,
+    status_chart,
+    status_summary,
 )
 
 st.header("LOF 数据看板")
@@ -81,6 +83,11 @@ for ticker in tickers:
     st.plotly_chart(nav_chart(df, ticker), use_container_width=True)
     st.plotly_chart(ohlcv_chart(df, ticker), use_container_width=True)
     st.plotly_chart(premium_chart(df, ticker, buy_threshold), use_container_width=True)
+    if not loader.has_status:
+        st.warning("该目录没有 daily_status 表，所有日子都按未知处理（实盘数据先运行 scripts/build_timeline.py build）")
+    st.plotly_chart(status_chart(df, ticker), use_container_width=True)
+    with st.expander("申购状态按来源统计"):
+        st.dataframe(status_summary(df), use_container_width=True, hide_index=True)
 
     with st.expander("原始数据"):
         st.dataframe(df.tail(20), use_container_width=True)

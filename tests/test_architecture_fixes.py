@@ -25,7 +25,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.data.loader import BundleResult, DataLoader
+from src.data.loader import DEFAULT_FEES, BundleResult, DataLoader
 from src.engine.account import Account
 from src.engine.backtest import (
     BacktestEngine,
@@ -33,7 +33,29 @@ from src.engine.backtest import (
     calculate_subscription_fee,
 )
 from src.config import BacktestConfig
+from src.pipeline.timeline import DAILY_STATUS_SCHEMA
 from src.strategy.simple_lof import SimpleLOFStrategy
+
+
+def write_status(base: Path, ticker: str, dates, status: str = "open") -> None:
+    """daily_status rows for one fund, one per date, all with the same status."""
+    conn = sqlite3.connect(base / "config" / "subscription_state.db")
+    conn.executescript(DAILY_STATUS_SCHEMA)
+    conn.executemany("INSERT INTO daily_status (fund_code, date, status, amount, source) VALUES (?, ?, ?, NULL, 'change')",
+                     [(ticker, d.strftime("%Y-%m-%d"), status) for d in dates])
+    conn.commit()
+    conn.close()
+
+
+def write_terms(base: Path, tiers_by_ticker: dict) -> None:
+    """A fund_terms.csv as scripts/fund_terms.py writes it, for domestic funds."""
+    import json
+
+    rows = [{"ticker": t, "name": "", "fund_type": "", "buy_confirm_days": 1, "sub_fee_tiers": json.dumps(tiers),
+             "error": "", "sell_days": 2, "sell_days_basis": "confirm", "nav_lag": 1,
+             "sub_fee_rate_1": tiers[0][1], "source": "eastmoney_jjfl", "fetched_at": "2026-11-19"}
+            for t, tiers in tiers_by_ticker.items()]
+    pd.DataFrame(rows).to_csv(base / "config" / "fund_terms.csv", index=False)
 
 
 class TestBundleResult(unittest.TestCase):
@@ -109,40 +131,9 @@ class TestDataLoaderReturnsBundleResult(unittest.TestCase):
         )
         nav_df.to_parquet(base / "nav" / "TEST01.parquet", index=False)
 
-        # Create fees CSV  # 创建费率 CSV
-        fees_df = pd.DataFrame(
-            [
-                {
-                    "ticker": "TEST01",
-                    "fee_rate_tier_1": 0.012,
-                    "fee_limit_1": 500000,
-                    "fee_rate_tier_2": 0.008,
-                    "fee_limit_2": 2000000,
-                    "fee_fixed": 1000.0,
-                    "redeem_fee_7d": 0.015,
-                }
-            ]
-        )
-        fees_df.to_csv(base / "config" / "fees.csv", index=False)
-
-        # Create empty fund_status.db  # 创建空的 fund_status.db
-        conn = sqlite3.connect(base / "config" / "fund_status.db")
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS limit_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ticker TEXT NOT NULL,
-                start_date DATE NOT NULL,
-                end_date DATE,
-                max_amount REAL NOT NULL,
-                reason TEXT,
-                source_announcement_ids TEXT DEFAULT '[]',
-                is_open_ended INTEGER GENERATED ALWAYS AS (
-                    CASE WHEN end_date IS NULL THEN 1 ELSE 0 END
-                ) STORED
-            )
-        """)
-        conn.commit()
-        conn.close()
+        # Trading terms for TEST01 only, and an open status every day  # 仅 TEST01 有交易条款；每天都可申购
+        write_terms(base, {"TEST01": [[1_000_000.0, 0.012, None], [None, None, 1000.0]]})
+        write_status(base, "TEST01", dates)
 
         self.loader = DataLoader(data_dir=self.tmpdir)
 
@@ -156,12 +147,13 @@ class TestDataLoaderReturnsBundleResult(unittest.TestCase):
         self.assertIsInstance(result.fee_config, dict)
 
     def test_load_bundle_fee_config_has_correct_values(self):
-        """Fee config should contain the values from fees.csv.
-        费率配置应包含 fees.csv 中的值。
+        """Fee config is the fund's own tiers from fund_terms.csv, or the defaults.
+        费率配置是 fund_terms.csv 中该基金自己的费率表，没有时用默认费率。
         """
         result = self.loader.load_bundle("TEST01")
-        self.assertAlmostEqual(result.fee_config["fee_rate_tier_1"], 0.012)
-        self.assertAlmostEqual(result.fee_config["fee_limit_1"], 500000)
+        self.assertEqual(result.fee_config["sub_fee_tiers"][0], [1_000_000.0, 0.012, None])
+        self.assertEqual(result.fee_config["fee_formula"], "net")
+        self.assertEqual(self.loader.load_fees("OTHER"), DEFAULT_FEES)
 
     def test_load_bundle_df_has_expected_columns(self):
         """DataFrame should have all expected columns.
@@ -203,8 +195,14 @@ class TestGenerateMockDataOutputDir(unittest.TestCase):
             # Verify files were created in the custom directory  # 验证文件已在自定义目录中创建
             self.assertTrue((Path(tmpdir) / "market" / "TEST01.parquet").exists())
             self.assertTrue((Path(tmpdir) / "nav" / "TEST01.parquet").exists())
-            self.assertTrue((Path(tmpdir) / "config" / "fees.csv").exists())
-            self.assertTrue((Path(tmpdir) / "config" / "fund_status.db").exists())
+            db = Path(tmpdir) / "config" / "subscription_state.db"
+            self.assertTrue(db.exists())
+            self.assertFalse((Path(tmpdir) / "config" / "fees.csv").exists())
+            conn = sqlite3.connect(db)
+            n_days = len(pd.read_parquet(Path(tmpdir) / "market" / "TEST01.parquet"))
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM daily_status WHERE fund_code = 'TEST01'").fetchone()[0],
+                             n_days)
+            conn.close()
 
 
 class TestT2SettlementSellBehavior(unittest.TestCase):
@@ -340,38 +338,7 @@ class TestTradeLogActionCase(unittest.TestCase):
         )
         nav_df.to_parquet(base / "nav" / "TEST01.parquet", index=False)
 
-        fees_df = pd.DataFrame(
-            [
-                {
-                    "ticker": "TEST01",
-                    "fee_rate_tier_1": 0.015,
-                    "fee_limit_1": 500000,
-                    "fee_rate_tier_2": 0.01,
-                    "fee_limit_2": 2000000,
-                    "fee_fixed": 1000.0,
-                    "redeem_fee_7d": 0.015,
-                }
-            ]
-        )
-        fees_df.to_csv(base / "config" / "fees.csv", index=False)
-
-        conn = sqlite3.connect(base / "config" / "fund_status.db")
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS limit_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ticker TEXT NOT NULL,
-                start_date DATE NOT NULL,
-                end_date DATE,
-                max_amount REAL NOT NULL,
-                reason TEXT,
-                source_announcement_ids TEXT DEFAULT '[]',
-                is_open_ended INTEGER GENERATED ALWAYS AS (
-                    CASE WHEN end_date IS NULL THEN 1 ELSE 0 END
-                ) STORED
-            )
-        """)
-        conn.commit()
-        conn.close()
+        write_status(base, "TEST01", dates)
 
     def test_trade_actions_are_lowercase(self):
         """All trade log action values should be lowercase 'buy' or 'sell'.
@@ -389,6 +356,7 @@ class TestTradeLogActionCase(unittest.TestCase):
         )
         result = engine.run("TEST01")
 
+        self.assertFalse(result.trade_logs.empty)
         if not result.trade_logs.empty:
             actions = result.trade_logs["action"].unique()
             for action in actions:

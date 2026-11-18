@@ -1,5 +1,7 @@
 # 详细设计说明书 (Detailed Design Document)
 
+> **已过时**：本文描述的是阶段 G 之前的旧链路（`limit_events`、`postprocess.py`、Kimi 客户端、`fees.csv`），这些代码已经删除。当前设计见 [redesign-subscription-state.md](redesign-subscription-state.md)，用法见 [README.md](../README.md)。
+
 ## 1. 引言
 
 ### 1.1 目的

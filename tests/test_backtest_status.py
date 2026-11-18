@@ -67,7 +67,7 @@ class TestLoader(TempData):
                                "2024-03-05": ("limited", None, "restatement"), "2024-03-06": ("unknown", None, "default"),
                                "2024-03-07": ("closed", None, "overlay")})
         loader = DataLoader(str(self.dir))
-        self.assertEqual(loader.limits, "daily_status")
+        self.assertTrue(loader.has_status)
         df = loader.load_bundle("160723").df
         self.assertEqual(df.loc["2024-03-01", "daily_limit"], np.inf)
         self.assertEqual(df.loc["2024-03-04", "daily_limit"], 100.0)
@@ -78,17 +78,15 @@ class TestLoader(TempData):
         self.assertEqual(df.loc["2024-03-08", "status_source"], "default")
         self.assertEqual(df.loc["2024-03-06", "nav"], 1.0)                   # market/NAV gaps are still filled
 
-    def test_legacy_fallback_and_explicit_source(self):
+    def test_no_status_table_means_unknown(self):
         self.fund("160723")
         loader = DataLoader(str(self.dir))
-        self.assertEqual(loader.limits, "legacy")
+        self.assertFalse(loader.has_status)
         df = loader.load_bundle("160723").df
-        self.assertTrue((df["daily_limit"] == np.inf).all())
-        self.assertEqual(set(df["status_source"]), {"legacy"})
-        with self.assertRaises(FileNotFoundError):
-            DataLoader(str(self.dir), limits="daily_status")
+        self.assertTrue(df["daily_limit"].isna().all())
+        self.assertEqual((set(df["sub_status"]), set(df["status_source"])), ({"unknown"}, {"default"}))
         with self.assertRaises(ValueError):
-            DataLoader(str(self.dir), limits="gold")
+            DataLoader(str(self.dir), terms="gold")
 
 
 class TestPolicy(unittest.TestCase):
@@ -153,6 +151,55 @@ class TestEngine(TempData):
         by = pnl_by(trips, "status_source").set_index("status_source")
         self.assertEqual(int(by.loc["inferred_open", "trips"]), 1)
         self.assertEqual(int(by["trips"].sum()), len(trips))
+
+
+class TestMockData(unittest.TestCase):
+    """The mock generator writes daily_status, and the backtest runs on it end to end."""
+
+    @classmethod
+    def setUpClass(cls):
+        from src.data.generator import MockConfig, generate_mock_data
+
+        cls.tmp = tempfile.mkdtemp(prefix="lof_mock_")
+        cls.cfg = MockConfig(tickers=["161005", "162411"], start_date="2024-01-01", end_date="2024-06-28")
+        generate_mock_data(cls.cfg, output_dir=cls.tmp)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_status_and_backtest(self):
+        loader = DataLoader(self.tmp)
+        self.assertTrue(loader.has_status)
+        self.assertEqual(loader.terms_mode, "default")
+        frames = {t: loader.load_bundle(t).df for t in self.cfg.tickers}
+        statuses = set().union(*(set(df["sub_status"]) for df in frames.values()))
+        self.assertTrue({"open", "limited"} <= statuses <= {"open", "limited"})
+        for df in frames.values():
+            self.assertTrue((df.loc[df["sub_status"] == "limited", "daily_limit"] == self.cfg.limit_max_amount).all())
+        cfg = BacktestConfig(initial_cash=100_000, buy_threshold=0.02)
+        logs = BacktestEngine(cfg, SimpleLOFStrategy(), loader).run(self.cfg.tickers).trade_logs
+        buys = logs[logs["action"] == "buy"]
+        self.assertFalse(buys.empty)
+        on_limited = buys[buys["sub_status"] == "limited"]
+        self.assertTrue((on_limited["amount"] <= self.cfg.limit_max_amount + 1e-9).all())
+
+    def test_regenerating_in_another_process_gives_the_same_data(self):
+        import subprocess
+
+        other = tempfile.mkdtemp(prefix="lof_mock_")
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        code = ("from src.data.generator import MockConfig, generate_mock_data; "
+                f"generate_mock_data(MockConfig(tickers=['161005'], start_date='{self.cfg.start_date}', "
+                f"end_date='{self.cfg.end_date}'), output_dir={other!r})")
+        try:
+            subprocess.run([sys.executable, "-c", code], cwd=root, check=True, capture_output=True, timeout=120,
+                           env={**os.environ, "PYTHONHASHSEED": "12345"})
+            for sub in ("market", "nav"):
+                pd.testing.assert_frame_equal(pd.read_parquet(Path(self.tmp) / sub / "161005.parquet"),
+                                              pd.read_parquet(Path(other) / sub / "161005.parquet"))
+        finally:
+            shutil.rmtree(other, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
 # LOF Fund Open-Ended Purchase Limit Events Technical Proposal
 
+> **已过时**：本文描述的是阶段 G 之前的旧链路（`limit_events`、`postprocess.py`、Kimi 客户端、`fees.csv`），这些代码已经删除。当前设计见 [docs/redesign-subscription-state.md](docs/redesign-subscription-state.md)，用法见 [README.md](README.md)。
+
 **Project**: lof-eins  
 **Date**: 2026-02-06  
 **Status**: Complete  

@@ -11,7 +11,7 @@ restriction. See docs/redesign-subscription-state.md §7.4.
 
 Usage:
     python scripts/red_flags.py
-    python scripts/red_flags.py --candidate legacy --start 2022-01-01 --out docs/eval/legacy-red-flags.md
+    python scripts/red_flags.py --start 2022-01-01 --out docs/eval/v2-red-flags.md
 """
 
 import argparse
@@ -43,7 +43,7 @@ def rel(path: str) -> str:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data-dir", default=str(PROJECT_ROOT / "data" / "real_all_lof"))
-    p.add_argument("--candidate", default="legacy", choices=sorted(CANDIDATES))
+    p.add_argument("--candidate", default="v2", choices=sorted(CANDIDATES))
     p.add_argument("--start", help="ignore days before this date (YYYY-MM-DD)")
     p.add_argument("--min-premium", type=float, default=0.05)
     p.add_argument("--min-days", type=int, default=3)

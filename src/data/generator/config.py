@@ -47,7 +47,7 @@ class MockConfig:
     nav_drift: float = -0.0005  # ~7.5% annualized
     nav_volatility: float = 0.015  # ~24% annualized
     limit_max_amount: float = 100.0
-    normal_max_amount: float = 1_000_000.0
+    normal_max_amount: float = -1.0  # open outside limit periods
 
     def __post_init__(self):
         """Validate configuration parameters. / 验证配置参数"""

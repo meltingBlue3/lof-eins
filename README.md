@@ -2,633 +2,265 @@
 
 ## 概述
 
-这是一个配置驱动的 LOF (Listed Open-Ended Fund) 基金套利回测系统，具备**限购增强功能**：从基金公告 PDF 中自动提取限购信息，生成准确的每日限购数据用于回测。
+回测 LOF 基金的溢价套利：场内价格高于净值时按净值申购，份额到账后在场内卖出。
 
-系统包含完整的回测引擎（T+2 结算、阶梯费率）、mock 数据生成器，以及公告处理流水线（PDF 文本提取 → LLM 解析 → 数据库存储）。
+结论能不能信，取决于两件事：
+- **每天到底能不能申购、能申购多少**：高溢价往往正是因为申购被关了。
+- **成本和时序**：申购费、份额什么时候能卖、决策时能看到哪天的净值。
 
-**核心价值：** 准确的限购数据是可靠套利回测的前提。系统通过本地 LLM 解析基金公告，自动识别限购事件并集成到回测数据中。
+所以系统的核心是一条从基金公告构建**每日申购状态**的流水线：公告 PDF → 状态声明 → 每日状态。回测在这份状态上同时跑保守和乐观两个边界。
 
-**项目进度：** Phase 1（基础架构）✅ Phase 2（PDF 处理）✅ Phase 3（时间线集成）🔲 Phase 4（端到端集成）🔲
+设计见 [docs/redesign-subscription-state.md](docs/redesign-subscription-state.md)，各阶段的评估和结果见 [docs/eval/README.md](docs/eval/README.md)。
+
+### 当前结论（2022-01-04 ~ 2024-12-31，410 只基金，1 万元起步）
+
+| | 保守边界 | 乐观边界 |
+|---|---:|---:|
+| 旧数据（限购数据有缺口） | +7,585%（不分边界） | |
+| 新的每日状态，阶段 E 的假设（统一 1.5%、T+2、T 日净值） | +3.9% | +165% |
+| **加上真实费率、真实可卖日、决策时可见的净值（阶段 F）** | **−46.0%** | **+64.6%** |
+| 阶段 F，申购费打 1 折 | +381% | +1,239% |
+
+- 按招募说明书的费率，这个策略没有可靠的超额收益：保守边界亏损，乐观边界剔除红旗日后每笔约为 0。
+- 只有拿到大幅申购费折扣时结论才会变。详见 [phase-f-sensitivity.md](docs/eval/phase-f-sensitivity.md)。
 
 ## 项目结构
 
 ```
 lof-eins/
-├── src/                               # 主源代码包
-│   ├── __init__.py
-│   ├── config.py                      # 回测配置 (BacktestConfig)
-│   ├── data/                          # 数据模块
-│   │   ├── __init__.py
-│   │   ├── loader.py                  # 数据加载器 (支持 NULL end_date)
-│   │   ├── downloader.py              # 真实数据下载器 (JoinQuant)
-│   │   ├── announcement_downloader.py # 公告 PDF 下载器 (Eastmoney)
-│   │   ├── pdf_extractor.py           # PDF 文本提取 (pdfplumber)
-│   │   ├── llm_client.py             # LLM 解析客户端 (Ollama)
-│   │   ├── announcement_processor.py  # 公告处理流水线
-│   │   └── generator/                 # Mock 数据生成器
-│   │       ├── __init__.py
-│   │       ├── config.py
-│   │       ├── generators.py
-│   │       └── main.py
-│   ├── strategy/                      # 策略模块
-│   │   ├── __init__.py
-│   │   ├── base.py                    # 策略基类 (BaseStrategy, Signal)
-│   │   └── simple_lof.py             # 简单 LOF 策略
-│   └── engine/                        # 回测引擎
-│       ├── __init__.py
-│       ├── account.py                 # 账户管理 (T+2 结算)
-│       └── backtest.py                # 回测执行引擎
-├── scripts/                           # 可执行脚本
-│   ├── download_lof.py                # 下载市场/NAV 数据 (JoinQuant)
-│   ├── download_announcements.py      # 下载公告 PDF (Eastmoney)
-│   ├── parse_announcements.py         # 解析公告 PDF → 限购数据 (Ollama)
-│   ├── generate_mock.py               # 生成 mock 数据
-│   └── inspect_data.py                # 数据可视化验证
-├── tests/                             # 测试文件 (103+ 测试用例)
-│   ├── test_loader.py                 # DataLoader 测试
-│   ├── test_open_ended_limits.py      # 开放式限购测试 (12 tests)
-│   ├── test_database_schema.py        # 数据库 schema 测试 (47 tests)
-│   ├── test_pdf_extractor.py          # PDF 提取测试 (9 tests)
-│   ├── test_llm_client.py            # LLM 客户端测试 (22 tests)
-│   └── test_announcement_processor.py # 流水线测试 (13 tests)
-├── configs/                           # YAML 配置文件
-│   ├── backtest.yaml                  # 回测配置
-│   └── mock.yaml                      # Mock 数据生成配置
-├── data/                              # 数据目录 (gitignored)
-├── requirements.txt
-├── run_backtest.py                    # 回测入口
-└── TECHNICAL_PROPOSAL.md              # 技术方案文档
+├── src/
+│   ├── config.py                    # BacktestConfig
+│   ├── data/
+│   │   ├── loader.py                # DataLoader：行情、净值、每日状态、交易条款
+│   │   ├── downloader.py            # 行情和净值下载（JoinQuant）
+│   │   ├── announcement_downloader.py  # 公告 PDF 下载
+│   │   ├── fund_terms.py            # 申购费率、确认日、净值滞后（天天基金费率页）
+│   │   └── generator/               # 模拟数据生成器（写 daily_status）
+│   ├── pipeline/                    # 申购状态流水线
+│   │   ├── db.py                    # subscription_state.db 的表结构
+│   │   ├── registry.py              # 公告登记（sha256）
+│   │   ├── triage.py                # 按标题分诊
+│   │   ├── texts.py                 # PDF 正文缓存（pdfplumber，按字号调整容差）
+│   │   ├── llm.py                   # OpenAI 兼容的 LLM 客户端（LOF_LLM_* 环境变量）
+│   │   ├── extract.py               # 状态声明抽取（prompts/extract_v2.md）
+│   │   └── timeline.py              # 状态声明 → daily_status
+│   ├── evaluation/                  # 金标、对照、红旗、利润归因
+│   ├── strategy/                    # BaseStrategy、SimpleLOFStrategy
+│   └── engine/                      # Account（T+n 结算）、BacktestEngine、BacktestResult
+├── scripts/                         # 每个流水线步骤一个脚本，见下文
+├── app/                             # Streamlit 应用
+├── prompts/extract_v2.md            # 抽取 prompt
+├── data/gold/                       # 19 只基金的金标时间线（提交在仓库里）
+├── data/real_all_lof/, data/mock/   # 数据目录（不提交）
+├── configs/backtest.yaml, mock.yaml
+├── docs/
+├── tests/
+└── run_backtest.py                  # 回测入口
 ```
 
-## 依赖安装
+数据目录的结构：
+
+```
+market/<代码>.parquet            date, open, high, low, close, volume
+nav/<代码>.parquet               date, nav
+announcements/<代码>/*.pdf       公告原文（实盘数据）
+config/subscription_state.db     announcements, pdf_texts, extractions, state_assertions,
+                                 anomalies, daily_status
+config/fund_terms.csv            交易条款（可选）
+config/fund_pages/               天天基金费率页的缓存
+```
+
+## 安装
 
 ```bash
 pip install -r requirements.txt
 ```
 
-依赖项：
-- `numpy >= 1.26.4` — 数值计算
-- `pyarrow >= 14.0.0` — Parquet 文件读写
-- `PyYAML >= 6.0` — YAML 配置解析
-- `jqdatasdk >= 1.9.8` — JoinQuant 数据下载
-- `python-dotenv >= 1.0.0` — 环境配置
-- `pdfplumber >= 0.10.0` — PDF 文本提取（中文支持）
-- `requests >= 2.32.3` — HTTP 客户端
-- `ollama >= 0.4.0` — Ollama LLM API 客户端
-- `plotly >= 5.0.0` — 数据可视化（可选）
+复制 `.env.example` 为 `.env` 并填写：JoinQuant 账号用于下载行情，`LOF_LLM_*` 用于公告抽取，可以是任何 OpenAI 兼容的接口。`.env` 不要提交。
 
-### Ollama 安装
-
-公告解析功能需要本地运行 Ollama：
-
-1. 从 https://ollama.com 下载安装 Ollama
-2. 拉取推荐模型：
-   ```bash
-   ollama pull qwen3:8b
-   ```
-3. 确认 Ollama 正在运行（默认端口 `localhost:11434`）
-
-可通过环境变量自定义：
-- `OLLAMA_HOST` — Ollama API 地址（默认 `http://localhost:11434`）
-- `OLLAMA_MODEL` — 使用的模型（默认 `qwen3:8b`）
-
-## 快速开始
-
-### 1. 准备数据
-
-#### 选项 A: 下载真实 LOF 数据（推荐）
-
-**1. 配置 JoinQuant 账户**
-
-创建 `.env` 文件在项目根目录：
+## 快速开始：模拟数据
 
 ```bash
-JQ_USERNAME=your_username
-JQ_PASSWORD=your_password
-```
-
-**2. 下载市场/NAV 数据**
-
-```bash
-# 使用默认配置（最近2个月）
-python scripts/download_lof.py
-
-# 自定义日期范围
-python scripts/download_lof.py --start 2024-01-01 --end 2024-12-31
-```
-
-**3. 下载基金公告 PDF**
-
-```bash
-# 下载所有 ticker 的公告
-python scripts/download_announcements.py
-
-# 下载指定 ticker
-python scripts/download_announcements.py --ticker 161005
-```
-
-**4. 解析公告提取限购信息**
-
-```bash
-# 解析单个 ticker 的公告（需要 Ollama 运行中）
-python scripts/parse_announcements.py --ticker 161005
-
-# 解析所有 ticker
-python scripts/parse_announcements.py --all
-
-# 调试模式
-python scripts/parse_announcements.py --ticker 161005 --verbose
-```
-
-#### 选项 B: 生成 Mock 数据（用于测试）
-
-```bash
-# 使用默认配置
 python scripts/generate_mock.py
-
-# 使用自定义配置
-python scripts/generate_mock.py --config configs/my_mock.yaml
 ```
-
-或通过 Python 代码：
-
-```python
-from src.data.generator import MockConfig, generate_mock_data
-
-config = MockConfig(
-    tickers=['161005', '162411', '161725'],
-    start_date="2024-01-01",
-    end_date="2024-06-30",
-    limit_trigger_threshold=0.15,
-    limit_release_threshold=0.05,
-)
-generate_mock_data(config)
-```
-
-### 2. 运行回测
 
 ```bash
-# 使用默认配置
-python run_backtest.py
-
-# 使用自定义配置
-python run_backtest.py --config configs/my_backtest.yaml
+python run_backtest.py -c configs/mock_backtest.yaml
 ```
 
-或通过 Python 代码：
+`configs/backtest.yaml` 默认指向实盘数据目录；用模拟数据时，复制一份并把 `data_dir` 改成 `./data/mock`（上面的 `mock_backtest.yaml` 就是这样一份副本）。
+
+模拟数据在溢价过高时生成限额期，其余日子开放，所有日子的来源都是 `change`，所以两个边界的结果相同。模拟基金没有交易条款文件，使用默认条款。
+
+## 实盘数据流水线
+
+每一步都可以重跑，只做缺的部分。只有第 1 步需要 JoinQuant 账号，只有第 4 步和 `llm-triage` 调用模型。
+
+1. **行情和净值**
+
+   ```bash
+   python scripts/download_lof.py --start 2021-01-01
+   ```
+
+2. **公告 PDF**
+
+   ```bash
+   python scripts/download_announcements.py
+   ```
+
+3. **公告登记、分诊、正文缓存**（阶段 B）
+
+   ```bash
+   python scripts/build_corpus.py all
+   ```
+
+   ```bash
+   python scripts/build_corpus.py llm-triage
+   ```
+
+4. **抽取状态声明**（阶段 C）。只对还没用当前 prompt 版本和模型抽取过的公告调用模型。
+
+   ```bash
+   python scripts/extract_v2.py run
+   ```
+
+   ```bash
+   python scripts/extract_v2.py report --out docs/eval/extract-v2-report.md
+   ```
+
+5. **构建每日状态**（阶段 D）
+
+   ```bash
+   python scripts/build_timeline.py build
+   ```
+
+   ```bash
+   python scripts/build_timeline.py report --out docs/eval/timeline-report.md
+   ```
+
+6. **交易条款**（阶段 F）。`fetch` 访问天天基金的公开页面，已缓存的不会重抓。
+
+   ```bash
+   python scripts/fund_terms.py fetch
+   ```
+
+   ```bash
+   python scripts/fund_terms.py build
+   ```
+
+7. **回测**
+
+   ```bash
+   python run_backtest.py --bounds
+   ```
+
+   ```bash
+   python run_backtest.py --sensitivity
+   ```
+
+   `--bounds` 同时跑保守和乐观两个边界，并按买入日的状态来源和红旗区间做利润归因；`--sensitivity` 依次叠加阶段 F 的各项修正。两者默认从状态库里的第一份公告开始。
+
+8. **评估**：对照金标，以及扫描红旗。
+
+   ```bash
+   python scripts/eval_timeline.py --out docs/eval/v2-timeline.md
+   ```
+
+   ```bash
+   python scripts/red_flags.py --start 2022-01-01 --out docs/eval/v2-red-flags.md
+   ```
+
+### 每日状态
+
+`daily_status` 每只基金每个交易日一行：
+
+| 列 | 取值 |
+|---|---|
+| `status` | `open`、`limited`、`closed`、`unknown` |
+| `amount` | 限额（元），金额不明时为空 |
+| `source` | `change`、`restatement`、`overlay`（临时安排，如节假日暂停）、`inferred_prior`（首条公告之前，由公告里的"原状态"推断）、`inferred_open`（由节假日公告推断为平时开放）、`default`（没有任何信息，即 unknown） |
+
+冲突（同日矛盾、跨越、重述不一致）一律取更严的状态，并记入 `anomalies` 表。规则见重构方案 §7。
+
+## 回测引擎
+
+### BacktestConfig
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `initial_cash` | 300,000 | 初始资金（`configs/backtest.yaml` 里是 1 万） |
+| `buy_threshold` | 0.02 | 买入溢价阈值 |
+| `liquidity_ratio` | 0.1 | 可成交量占成交量的比例 |
+| `commission_rate` | 0.0003 | 卖出佣金 |
+| `risk_mode` | `fixed` | `fixed` 受现金约束，`infinite` 不受 |
+| `use_ma5_liquidity` | True | 流动性用 min(当日成交量, 5 日均量) |
+| `max_premium_rate` | None | 溢价超过它就不买 |
+| `risk_free_rate` | 0.02 | 夏普比率用 |
+| `unknown_policy` | `closed` | 无法证明可申购的日子（unknown、金额不明的限额、只是推断出来的开放）：`closed` 不买（保守边界），`open` 当作不限购（乐观边界） |
+| `n_accounts` | 1 | 限额乘以账户数 |
+| `premium_basis` | `published` | 决策溢价：`published` 用决策时可见的最新净值（境内 T-1，境外和 FOF T-2）；`same_day` 用 T 日净值，有前视偏差 |
+| `fees` | `fund` | `fund` 用各基金自己的费率表（外扣法），没有的用默认费率；`default` 统一用默认费率 |
+| `settlement` | `fund` | `fund` 用各基金自己的可卖日（确认日 + 1，QDII T+3）；`t2` 统一 T+2 |
+| `fee_discount` | 1.0 | 乘在比例费率上，每笔固定费用不打折 |
+
+### 每日流程
+
+1. 到期的份额结算入账，已结算份额全部按收盘价卖出。
+2. 决策溢价超过阈值、且当天的申购上限大于 0 的基金按溢价从高到低排序，依次买入。每笔取以下几项中的最小值：
+   - 申购上限（每日状态按 `unknown_policy` 换算，乘以账户数）；
+   - 流动性上限；
+   - 可用现金；
+   - 单笔 10 万元。
+3. 申购按 T 日净值成交，扣除申购费；份额在 T+`sell_days` 个交易日后可卖。
+
+默认费率：50 万以下 1.5%，200 万以下 1.0%，以上每笔 1000 元。
+
+**注意**：买卖规则写在 `BacktestEngine.run` 里，`SimpleLOFStrategy` 和 `BaseStrategy.generate_signals` 目前并没有被引擎调用。只实现一个新的策略类不会改变回测结果，要换策略得同时改引擎。
+
+### 使用示例
 
 ```python
-from src import BacktestConfig, BacktestEngine, SimpleLOFStrategy, DataLoader
+from src import BacktestConfig, BacktestEngine, DataLoader, SimpleLOFStrategy
 
-config = BacktestConfig(
-    initial_cash=300_000.0,
-    buy_threshold=0.02,
-    liquidity_ratio=0.1,
-    commission_rate=0.0003,
-    risk_mode='fixed',
-)
-
-strategy = SimpleLOFStrategy()
-loader = DataLoader(data_dir='./data/real_all_lof')
-engine = BacktestEngine(config=config, strategy=strategy, data_loader=loader)
-result = engine.run(tickers=['161005', '162411'])
-print(result)
+loader = DataLoader("./data/real_all_lof")            # terms="default" 可忽略 fund_terms.csv
+config = BacktestConfig(initial_cash=10_000, buy_threshold=0.017, unknown_policy="closed")
+result = BacktestEngine(config, SimpleLOFStrategy(), loader).run(["161005", "162411"], start_date="2022-01-04")
+print(result.total_return, result.max_drawdown, result.sharpe_ratio)
+result.trade_logs        # 每笔成交：价格、金额、申购费、决策溢价、买入日状态和来源、可卖日
+result.daily_perf        # 每日总资产、现金、持仓市值
 ```
 
-#### 输出示例
+`DataLoader.load_bundle(code).df` 的列：`open/high/low/close/volume`、`nav`、`premium_rate`（T 日净值）、`nav_published`、`premium_published`（决策时可见的净值）、`daily_limit`（公告写明的上限：开放为 inf，暂停为 0，限额为金额，未知或金额不明为 NaN）、`sub_status`、`status_source`。
 
-```
-============================================================
-BACKTEST RESULTS
-============================================================
-
-Performance Metrics:
-  Total Return:         125.91%
-  Annualized Return:    118.99%
-  Max Drawdown:          17.06%
-  Sharpe Ratio:            2.11
-
-Trading Summary:
-  Total Trades:             283
-  Buy Trades:               142
-  Sell Trades:              141
-
-Account Summary:
-  Initial Capital:       312,546.70 CNY
-  Final Value:           706,068.16 CNY
-  Profit/Loss:           393,521.46 CNY
-============================================================
-```
-
-## 限购增强功能
-
-### 背景
-
-LOF 套利回测的准确性高度依赖限购数据。现有系统可以从 Eastmoney 下载公告 PDF，但**下载的 PDF 从未被解析**，`fund_status.db` 中的限购数据要么为空（真实数据），要么为 mock 生成。
-
-### 解决方案
-
-```mermaid
-graph LR
-    A[公告 PDF] -->|pdfplumber| B[提取文本]
-    B -->|Ollama LLM| C[解析限购信息]
-    C -->|存储| D[announcement_parses]
-    D -->|Phase 3| E[时间线集成]
-    E -->|写入| F[limit_events]
-    F -->|回测| G[准确的限购约束]
-```
-
-### 四阶段计划
-
-| Phase | 名称 | 状态 | 说明 |
-|-------|------|------|------|
-| 1 | 基础架构 | ✅ 完成 | 修复 NULL end_date、新建 3 张表、103+ 测试 |
-| 2 | PDF 处理 | ✅ 完成 | PDF 提取 + LLM 解析 + 流水线编排 |
-| 3 | 时间线集成 | 🔲 待开始 | 合并重叠限购区间、写入 limit_events |
-| 4 | 端到端集成 | 🔲 待开始 | 完整流水线验证、回测验证 |
-
-### 支持的公告类型
-
-| 类型 | 说明 | 示例 |
-|------|------|------|
-| `complete` | 有明确开始和结束日期 | "自2024-01-15起暂停大额申购...恢复时间2024-03-01" |
-| `open-start` | 限购已生效，仅告知结束 | "已暂停大额申购，将于2024-06-01恢复" |
-| `end-only` | 宣布取消/结束限购 | "自2024-03-01起恢复大额申购" |
-| `modify` | 修改现有限购参数 | "限购金额由100元调整为500元" |
-
-## 公告处理流水线
-
-### 完整工作流
+## Streamlit 应用
 
 ```bash
-# Step 1: 下载市场数据
-python scripts/download_lof.py --start 2024-01-01 --end 2024-12-31
-
-# Step 2: 下载公告 PDF
-python scripts/download_announcements.py --ticker 161005
-
-# Step 3: 解析公告，提取限购信息
-python scripts/parse_announcements.py --ticker 161005
-
-# Step 4: (Phase 3 - 即将实现) 时间线集成
-
-# Step 5: 运行回测
-python run_backtest.py
+streamlit run app/app.py
 ```
 
-### 技术细节
-
-- **PDF 提取**：使用 pdfplumber，对中文 PDF 有优秀的支持。多页 PDF 使用 `--- Page N ---` 标记分页，保留上下文。
-- **LLM 解析**：通过 Ollama API 调用本地 LLM（默认 qwen3:8b）。使用 few-shot prompting（3 个示例）提高提取准确率。支持多日期公告（返回 `List[Dict]`）。
-- **数据存储**：解析结果以 JSON 格式存入 `announcement_parses` 表。非限购公告也会存储（`is_purchase_limit_announcement=false`），保留完整审计记录。
-- **错误处理**：单个 PDF 解析失败不会中断批量处理。返回结构化结果字典 `{success, stored, parse_result, error}`。
-
-## 回测引擎架构
-
-### 核心组件
-
-```mermaid
-graph TB
-    subgraph config [配置层]
-        BC[BacktestConfig]
-    end
-    
-    subgraph strategy [策略层]
-        SB[BaseStrategy]
-        SL[SimpleLOFStrategy]
-        SL --> SB
-    end
-    
-    subgraph engine [引擎层]
-        ACC[Account - T+2结算]
-        BE[BacktestEngine]
-        BR[BacktestResult]
-        BE --> ACC
-        BE --> BR
-    end
-    
-    subgraph data [数据层]
-        DL[DataLoader]
-    end
-    
-    BE --> SL
-    BE --> DL
-    BC --> BE
-```
-
-### BacktestConfig 参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `initial_cash` | float | `300_000.0` | 初始资金 |
-| `liquidity_ratio` | float | `0.1` | 流动性比例（占可用成交量的比例） |
-| `buy_threshold` | float | `0.02` | 买入阈值（最低溢价率） |
-| `commission_rate` | float | `0.0003` | 卖出佣金率 |
-| `risk_mode` | str | `'fixed'` | 风险模式（'fixed' 或 'infinite'） |
-| `use_ma5_liquidity` | bool | `True` | 是否使用 MA5 成交量限制 |
-| `risk_free_rate` | float | `0.02` | 无风险利率（用于夏普比率） |
-
-### SimpleLOFStrategy 逻辑
-
-1. **卖出**：如果持有任何仓位 -> 全部卖出（快速止盈）
-2. **买入**：如果 `溢价率 > buy_threshold` 且 `daily_limit > 0` -> 买入最大可能金额
-
-### T+2 结算机制
-
-- **买入**：资金立即扣除，份额进入待结算队列（T+2 交易日后到账）
-- **卖出**：资金 T+0 到账（立即可用），仅能卖出已结算份额
-- **结算日期**：基于实际交易日历计算（非自然日）
-
-### 费率计算（阶梯式）
-
-| 申购金额 | 费率类型 | 费率 |
-|---------|---------|------|
-| < 50万 | 比例费率 | 1.5% |
-| 50万 - 200万 | 比例费率 | 1.0% |
-| ≥ 200万 | 固定费用 | 1000 元/笔 |
-
-**卖出佣金**：按 `commission_rate` 比例收取（默认 0.03%）
-
-### 约束条件（买入时取最小值）
-
-1. **限购约束**：`row['daily_limit']`（来自 SQLite 限购事件）
-2. **流动性约束**：`min(volume, ma5_volume) * liquidity_ratio * price`
-3. **资金约束**：`account.cash`（仅在 `risk_mode='fixed'` 时）
-
-## 数据库架构
-
-### limit_events（限购事件）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | INTEGER PK | 自增主键 |
-| ticker | TEXT NOT NULL | 基金代码 |
-| start_date | DATE NOT NULL | 限购开始日期 |
-| end_date | DATE | 限购结束日期（NULL = 开放式限购） |
-| max_amount | REAL NOT NULL | 限购期间最大申购金额 |
-| reason | TEXT | 限购原因 |
-| is_open_ended | INT (GENERATED) | 自动计算：`end_date IS NULL → 1, 否则 0` |
-| source_announcement_ids | TEXT | JSON 数组，关联的公告 ID（审计用） |
-
-**索引**：`idx_limit_events_ticker` (ticker), `idx_limit_events_dates` (ticker, start_date, end_date)
-
-### announcement_parses（公告解析结果）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | INTEGER PK | 自增主键 |
-| ticker | TEXT NOT NULL | 基金代码 |
-| pdf_filename | TEXT NOT NULL | PDF 文件名 |
-| extracted_text | TEXT | pdfplumber 提取的原始文本 |
-| parse_result | TEXT | LLM 解析结果（JSON 格式） |
-| confidence | REAL | 置信度分数（多记录取最小值） |
-| parsed_at | TIMESTAMP | 解析时间 |
-
-**约束**：`UNIQUE(ticker, pdf_filename)`（支持 INSERT OR REPLACE 重新处理）
-
-### limit_event_log（审计日志）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | INTEGER PK | 自增主键 |
-| ticker | TEXT NOT NULL | 基金代码 |
-| operation | TEXT NOT NULL | 操作类型（INSERT/UPDATE/DELETE） |
-| old_start_date | DATE | 变更前开始日期 |
-| old_end_date | DATE | 变更前结束日期 |
-| new_start_date | DATE | 变更后开始日期 |
-| new_end_date | DATE | 变更后结束日期 |
-| source | TEXT | 来源标识 |
-| reason | TEXT | 变更原因 |
-| logged_at | TIMESTAMP | 记录时间 |
-
-### 原有数据格式
-
-| 数据类型 | 格式 | 说明 |
-|---------|------|------|
-| Market Data | Parquet | OHLCV（date, ticker, open, high, low, close, volume） |
-| NAV Data | Parquet | 净值（date, ticker, nav） |
-| Fee Config | CSV | 阶梯费率配置 |
-| Fund Status | SQLite | 限购事件 + 公告解析 + 审计日志 |
-
-## 使用 DataLoader 读取数据
-
-```python
-from src.data.loader import DataLoader
-
-loader = DataLoader(data_dir='./data/real_all_lof')
-
-# 加载单个 ticker 的完整数据
-df = loader.load_bundle('161005')
-
-# 支持日期过滤
-df_filtered = loader.load_bundle('161005', start_date='2024-03-01', end_date='2024-06-30')
-
-# 费率配置自动附加到 DataFrame.attrs
-print(df.attrs['redeem_fee_7d'])  # 0.015
-
-# 自动发现所有可用 ticker
-tickers = loader.list_available_tickers()
-```
-
-### DataLoader 返回的 DataFrame 结构
-
-| 列名 | 类型 | 说明 |
-|------|------|------|
-| (index) | DatetimeIndex | 交易日期 |
-| open, high, low, close | float | OHLC 价格 |
-| volume | int | 成交量 |
-| nav | float | 净值 |
-| premium_rate | float | 溢价率 `(close - nav) / nav` |
-| daily_limit | float | 当日申购限额（无限购时为 `inf`，开放式限购正确支持 NULL end_date） |
-
-### DataLoader 特性
-
-- **自动对齐多源数据**：基于日期索引合并市场、NAV、限购数据
-- **NULL end_date 支持**：开放式限购（无结束日期）正确应用到每日序列
-- **预计算溢价率**：自动计算 `premium_rate = (close - nav) / nav`
-- **数据清洗**：`ffill()` 处理缺失值
-- **费率缓存**：首次加载后缓存，附加到 `DataFrame.attrs`
-- **自动 Ticker 发现**：扫描数据目录发现所有可用基金
-
-## 配置文件管理
-
-### 配置文件位置
-
-- **回测配置**: `configs/backtest.yaml`
-- **Mock 数据生成配置**: `configs/mock.yaml`
-
-### 示例
-
-**configs/backtest.yaml**:
-```yaml
-data_dir: ./data/real_all_lof
-tickers: all  # 自动发现所有基金
-
-initial_cash: 300000.0
-buy_threshold: 0.02
-liquidity_ratio: 0.1
-commission_rate: 0.0003
-risk_mode: fixed
-use_ma5_liquidity: true
-risk_free_rate: 0.02
-```
-
-**configs/mock.yaml**:
-```yaml
-tickers:
-  - "161005"
-  - "162411"
-start_date: "2024-01-01"
-end_date: "2024-12-31"
-initial_nav: 2.0
-premium_volatility: 0.01
-limit_trigger_threshold: 0.07
-limit_release_threshold: 0.03
-consecutive_days: 1
-```
-
-配置类支持 `from_yaml()` / `to_yaml()` API：
-
-```python
-from src import BacktestConfig
-config = BacktestConfig.from_yaml("configs/backtest.yaml")
-config.to_yaml("configs/my_config.yaml")
-```
-
-## 自定义策略
-
-通过继承 `BaseStrategy` 实现自定义策略：
-
-```python
-from src.strategy.base import BaseStrategy, Signal
-from typing import Dict, List
-import pandas as pd
-
-class MyStrategy(BaseStrategy):
-    def generate_signals(
-        self,
-        row: pd.Series,
-        positions: Dict[str, float],
-        config: BacktestConfig
-    ) -> List[Signal]:
-        signals = []
-        ticker = row['ticker']
-        
-        if row['premium_rate'] > 0.05:  # 5% 溢价时买入
-            signals.append(Signal('buy', ticker, 100_000.0))
-        
-        if row['premium_rate'] < 0.01:  # 1% 溢价时卖出
-            if positions.get(ticker, 0) > 0:
-                signals.append(Signal('sell', ticker, float('inf')))
-        
-        return signals
-```
-
-## API 参考
-
-### BacktestEngine
-
-```python
-engine = BacktestEngine(
-    config: BacktestConfig,
-    strategy: BaseStrategy,
-    data_loader: Optional[DataLoader] = None
-)
-
-result = engine.run(
-    ticker: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None
-) -> BacktestResult
-```
-
-### BacktestResult
-
-```python
-result.daily_perf          # DataFrame: 每日绩效数据
-result.trade_logs          # DataFrame: 交易日志
-result.config              # BacktestConfig: 回测配置
-result.total_return        # float: 总收益率
-result.annualized_return   # float: 年化收益率
-result.max_drawdown        # float: 最大回撤
-result.sharpe_ratio        # float: 夏普比率
-result.num_trades          # int: 总交易次数
-result.num_buy_trades      # int: 买入次数
-result.num_sell_trades     # int: 卖出次数
-```
-
-### AnnouncementProcessor
-
-```python
-from src.data.announcement_processor import AnnouncementProcessor
-
-processor = AnnouncementProcessor(
-    db_path="data/real_all_lof/config/fund_status.db",
-    announcements_dir="data/real_all_lof/announcements"
-)
-
-# 处理单个 PDF
-result = processor.process_pdf("161005", Path("path/to/announcement.pdf"))
-# result: {'success': True, 'stored': True, 'parse_result': {...}}
-
-# 批量处理 ticker 下所有 PDF
-stats = processor.process_ticker("161005")
-# stats: {'total': 10, 'extracted': 9, 'parsed': 8, 'stored': 8, 'failed': 1}
-```
-
-### PDF 提取 & LLM 解析
-
-```python
-from src.data.pdf_extractor import extract_pdf_text
-from src.data.llm_client import LLMClient
-
-# PDF 文本提取
-result = extract_pdf_text("path/to/announcement.pdf")
-# result: {'success': True, 'text': '...', 'pages': 3, 'error': None}
-
-# LLM 解析限购信息
-client = LLMClient()
-records = client.parse_announcement(result['text'], ticker="161005")
-# records: [{'ticker': '161005', 'limit_amount': 100.0, 'start_date': '2024-01-15', ...}]
-```
+- **数据看板**：行情、净值、溢价率，以及每日申购状态色带、限额走势和按来源统计的天数。
+- **回测**：参数表单，包括 `unknown_policy`、决策溢价、费率、可卖日和费率折扣。
+- **回测结果**：资产曲线、交易标记、分基金盈亏。
 
 ## 测试
 
 ```bash
-# 运行所有测试
 python -m pytest tests/
-
-# 或使用 unittest
-python -m unittest discover tests/
-
-# 运行特定测试文件
-python -m unittest tests/test_pdf_extractor.py
-python -m unittest tests/test_llm_client.py
-python -m unittest tests/test_announcement_processor.py
 ```
 
-### 测试概览
+| 文件 | 内容 |
+|---|---|
+| `test_pipeline.py` | 公告登记、分诊、正文缓存、LLM 客户端 |
+| `test_extract_v2.py` | 状态声明抽取、缓存、原文校验 |
+| `test_timeline.py` | 状态声明 → 每日状态的解析规则 |
+| `test_evaluation.py` | 金标对照、红旗、利润归因 |
+| `test_backtest_status.py` | 加载器、两个边界、模拟数据端到端 |
+| `test_phase_f.py` | 交易条款、申购费、可卖日、无前视的决策溢价 |
+| `test_architecture_fixes.py` | 加载器返回值、T+2 结算、成交记录 |
 
-| 测试文件 | 测试数 | 说明 |
-|---------|-------|------|
-| test_open_ended_limits.py | 12 | 开放式限购（NULL end_date）处理 |
-| test_database_schema.py | 47 | 三表 schema、索引、约束 |
-| test_loader.py | 4 | DataLoader 数据加载与对齐 |
-| test_pdf_extractor.py | 9 | PDF 文本提取、错误处理 |
-| test_llm_client.py | 22 | LLM 解析、mock 测试（不需要 Ollama） |
-| test_announcement_processor.py | 13 | 端到端流水线、批量处理 |
-| **合计** | **103+** | **全部通过 ✅** |
+## 旧链路
 
-> 注：2 个测试需要 Ollama 运行中才能执行（集成测试），其余均为纯单元测试。
-
-## 数据验证
-
-```bash
-# 可视化验证数据质量（需要 plotly）
-python scripts/inspect_data.py
-```
-
-展示溢价率走势、成交量、限购区域高亮等交互式图表。
+旧的"公告 → `subscription_restrictions` → `postprocess.py` → `limit_events`"链路、Kimi 客户端、`fees.csv` 都在阶段 G 删除了，最后一个包含它们的提交是 `17a5bfd`。实盘数据目录里如果还有 `config/fund_status.db` 和 `config/fees.csv`，现在已经不再读取，可以自行删除。`docs/eval/legacy-*.md` 是旧数据的评估记录。
 
 ## License
 

@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import BacktestConfig
-from src.data.loader import DataLoader, BundleResult
+from src.data.loader import DEFAULT_FEES, DataLoader, BundleResult
 from src.engine.account import Account
 from src.strategy.base import BaseStrategy, Signal
 
@@ -34,7 +34,7 @@ def effective_daily_limit(df: pd.DataFrame, unknown_policy: str, n_accounts: int
       unknown_policy='closed', inf under 'open' (an inferred limit keeps its amount there)
     """
     stated = df["daily_limit"].astype(float)
-    source = df["status_source"] if "status_source" in df else pd.Series("legacy", index=df.index)
+    source = df["status_source"]
     cap = stated.where(~np.isfinite(stated) | (stated <= 0), stated * n_accounts)
     inferred = source.isin(INFERRED_SOURCES) & (stated > 0)
     unproven = stated.isna() | inferred
@@ -50,16 +50,16 @@ def calculate_subscription_fee(amount: float, attrs: Dict[str, Any], discount: f
 
     With ``sub_fee_tiers`` (a fund's own table, [[upper_bound, rate, fixed_fee], ...] in
     order), the first tier whose upper bound exceeds the amount applies. Otherwise the
-    legacy three tiers from fees.csv:
+    default three tiers (DEFAULT_FEES):
     - Tier 1: amount < fee_limit_1 -> fee_rate_tier_1
     - Tier 2: fee_limit_1 <= amount < fee_limit_2 -> fee_rate_tier_2
     - Tier 3: amount >= fee_limit_2 -> fee_fixed (flat fee)
 
     ``fee_formula="net"`` is the prospectus formula (net amount = amount / (1 + rate), fee =
-    amount - net amount); the legacy default charges amount x rate. ``discount`` scales the
+    amount - net amount); without it the fee is amount x rate. ``discount`` scales the
     rate, not a fixed fee.
 
-    费率档位：有 sub_fee_tiers 时按基金自己的费率表；否则按 fees.csv 的三档。
+    费率档位：有 sub_fee_tiers 时按基金自己的费率表；否则按默认的三档。
     fee_formula="net" 为招募说明书的外扣法；discount 只打折比例费率，不打折固定费用。
 
     Args:
@@ -337,7 +337,7 @@ class BacktestEngine:
             terms = self.data_loader.load_terms(ticker)
             own_fees = self.config.fees == "fund" and "sub_fee_tiers" in terms
             all_fees[ticker] = {
-                **(terms if own_fees else bundle.fee_config),
+                **(bundle.fee_config if own_fees else DEFAULT_FEES),
                 "fee_source": terms["terms_source"] if own_fees else "default",
                 "sell_days": terms["sell_days"] if self.config.settlement == "fund" else 2,
             }
@@ -353,9 +353,6 @@ class BacktestEngine:
                 df["ma5_volume"] = df["volume"]
 
             # Purchase cap under the configured policy  # 按配置的策略换算申购上限
-            if "sub_status" not in df:
-                df["sub_status"] = "legacy"
-                df["status_source"] = "legacy"
             df["stated_limit"] = df["daily_limit"]
             df["daily_limit"] = effective_daily_limit(df, self.config.unknown_policy, self.config.n_accounts)
 
@@ -640,12 +637,12 @@ class BacktestEngine:
         执行带约束的买入订单。
 
         Constraints (take minimum):
-        - limit_cap: row['daily_limit'] (SQLite limit event)
+        - limit_cap: row['daily_limit'] (daily_status under unknown_policy)
         - liquid_cap: min(volume, ma5_volume) * liquidity_ratio
         - cash_cap: account.cash (if risk_mode == 'fixed')
 
         约束（取最小值）：
-        - 限额约束：row['daily_limit']（SQLite限购事件）
+        - 限额约束：row['daily_limit']（每日申购状态，按 unknown_policy 换算）
         - 流动性约束：min(volume, ma5_volume) * liquidity_ratio
         - 现金约束：account.cash（当risk_mode == 'fixed'时）
 
@@ -741,8 +738,8 @@ class BacktestEngine:
             "fee_source": fee_config.get("fee_source", "default"),
             "sell_days": sell_days,
             "daily_limit": daily_limit,
-            "sub_status": row.get("sub_status", "legacy"),
-            "status_source": row.get("status_source", "legacy"),
+            "sub_status": row["sub_status"],
+            "status_source": row["status_source"],
             "stated_limit": row.get("stated_limit", daily_limit),
             "limit_cap": limit_cap,
             "liquid_cap": liquid_cap,

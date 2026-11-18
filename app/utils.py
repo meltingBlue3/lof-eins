@@ -124,6 +124,86 @@ def ohlcv_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
     return _apply_chart_theme(fig)
 
 
+# Subscription status is a state, so it wears the status palette (never a series color),
+# always with a text label in the legend and the hover.  # 申购状态是状态，用状态色，并始终配文字标签
+STATUS_STYLE = {
+    "open": ("可申购", "#0ca30c"),
+    "limited": ("限额", "#fab219"),
+    "closed": ("暂停", "#d03b3b"),
+    "unknown": ("未知", "#c3c2b7"),
+}
+SOURCE_NAMES = {
+    "change": "公告变更", "restatement": "公告重述", "overlay": "临时安排", "inferred_prior": "推断（首条公告之前）",
+    "inferred_open": "推断开放（节假日公告）", "default": "无信息",
+}
+
+
+def status_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
+    """Daily subscription status as a band, and the stated limit below it (its own axis, log scale).
+
+    每日申购状态色带，下方是公告写明的限额（单独的对数轴）。
+    """
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.3, 0.7], vertical_spacing=0.08,
+                        subplot_titles=("申购状态", "限额（元，对数轴；只画金额已知的限额日）"))
+    source = df["status_source"].map(lambda s: SOURCE_NAMES.get(s, s))
+    for status, (label, color) in STATUS_STYLE.items():
+        mask = df["sub_status"] == status
+        if not mask.any():
+            continue
+        fig.add_trace(
+            go.Bar(
+                x=df.index[mask],
+                y=[1] * int(mask.sum()),
+                name=label,
+                marker_color=color,
+                marker_line_width=0,
+                customdata=source[mask],
+                hovertemplate=f"{label}<br>来源：%{{customdata}}<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+    limit = df["daily_limit"].where((df["sub_status"] == "limited") & (df["daily_limit"] > 0))
+    fig.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=limit,
+            mode="lines",
+            line_shape="hv",
+            line=dict(color="#6e6d66", width=2),
+            name="限额",
+            showlegend=False,
+            hovertemplate="限额 %{y:,.0f} 元<extra></extra>",
+        ),
+        row=2,
+        col=1,
+    )
+    fig.update_yaxes(visible=False, range=[0, 1], row=1, col=1)
+    fig.update_yaxes(type="log", dtick=1, tickformat=",", title_text="元", row=2, col=1)
+    # No weekend or holiday gaps, so the status band reads as one continuous strip  # 去掉周末和节假日空档，色带连续
+    holidays = pd.bdate_range(df.index.min(), df.index.max()).difference(df.index) if len(df) else []
+    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"]),
+                                  dict(values=[d.strftime("%Y-%m-%d") for d in holidays])])
+    _apply_chart_theme(fig)
+    fig.update_layout(
+        title=f"{ticker} — 申购状态（daily_status）",
+        barmode="stack",
+        bargap=0,
+        height=440,
+        margin=dict(t=90),
+        legend=dict(orientation="h", yanchor="bottom", y=1.1, xanchor="right", x=1, traceorder="normal"),
+    )
+    return fig
+
+
+def status_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Days per status and source, for the table view under the chart."""
+    t = df.groupby(["sub_status", "status_source"]).size().rename("天数").reset_index()
+    t["状态"] = t["sub_status"].map(lambda s: STATUS_STYLE.get(s, (s,))[0])
+    t["来源"] = t["status_source"].map(lambda s: SOURCE_NAMES.get(s, s))
+    return t[["状态", "来源", "天数"]].sort_values("天数", ascending=False).reset_index(drop=True)
+
+
 def premium_chart(
     df: pd.DataFrame,
     ticker: str,

@@ -4,6 +4,7 @@ Main entry point for LOF mock data generation.
 LOF模拟数据生成的主入口。
 """
 
+import sqlite3
 from pathlib import Path
 from typing import Optional
 
@@ -13,8 +14,7 @@ from .config import MockConfig
 from .generators import (
     NAVGenerator,
     PriceGenerator,
-    FeeConfigGenerator,
-    FundStatusGenerator,
+    StatusGenerator,
 )
 
 
@@ -29,8 +29,11 @@ def generate_mock_data(
     This function orchestrates the generation of: / 此函数协调生成：
     - NAV data (parquet files per ticker) / 净值数据（每个基金一个parquet文件）
     - Market data (parquet files per ticker) / 行情数据（每个基金一个parquet文件）
-    - Fee configuration (CSV file) / 费用配置（CSV文件）
-    - Fund status events (SQLite database) / 基金状态事件（SQLite数据库）
+    - Daily subscription status (daily_status in config/subscription_state.db, the table the
+      loader reads; rebuilt on every run) / 每日申购状态（config/subscription_state.db 里的 daily_status，每次重建）
+
+    No trading terms file is written, so the mock funds use the default terms (1.5%,
+    sell at T+2, NAV lag 1). / 不生成交易条款文件，模拟基金使用默认条款
 
     Args:
         config: MockConfig instance. If None, uses default configuration. / MockConfig实例。如为None则使用默认配置
@@ -64,24 +67,20 @@ def generate_mock_data(
     # Initialize generators  # 初始化生成器
     nav_gen = NAVGenerator(config)
     price_gen = PriceGenerator(config)
-    fee_gen = FeeConfigGenerator(config)
-    status_gen = FundStatusGenerator(config)
+    status_gen = StatusGenerator(config)
 
-    # Generate fee configuration (once for all tickers)  # 生成费用配置（所有基金共用一次）
-    print("\n[1/4] Generating fee configuration...")
-    fee_csv_path = config_dir / "fees.csv"
-    fee_gen.generate(fee_csv_path)
-    print(f"  [OK] Generated: {fee_csv_path}")
+    # Daily status table, rebuilt from scratch  # 每日状态表，每次重建
+    from src.pipeline.timeline import DAILY_STATUS_SCHEMA
 
-    # Initialize database for fund status  # 初始化基金状态数据库
-    db_path = config_dir / "fund_status.db"
+    db_path = config_dir / "subscription_state.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("DROP TABLE IF EXISTS daily_status")
+    conn.executescript(DAILY_STATUS_SCHEMA)
 
     total_limit_events = 0
 
     # Generate data for each ticker
-    print(
-        f"\n[2/4] Generating NAV and market data for {len(config.tickers)} tickers..."
-    )
+    print(f"\n[1/3] Generating NAV, market data and daily status for {len(config.tickers)} tickers...")
 
     for i, ticker in enumerate(config.tickers, 1):
         print(f"  [{i}/{len(config.tickers)}] Processing {ticker}...")
@@ -104,19 +103,20 @@ def generate_mock_data(
         print(f"      NAV: {nav_path}")
         print(f"      Market: {market_path}")
 
-        # Generate fund status events  # 生成基金状态事件
-        num_events = status_gen.generate(ticker, price_df, db_path)
+        # Daily subscription status  # 每日申购状态
+        num_events = status_gen.generate(ticker, price_df, conn)
         total_limit_events += num_events
 
         if num_events > 0:
-            print(f"      Limit Events: {num_events}")
+            print(f"      Limit periods: {num_events}")
 
-    print(f"\n[3/4] Generating fund status database...")
-    print(f"  [OK] Generated: {db_path}")
-    print(f"    Total limit events across all tickers: {total_limit_events}")
+    conn.commit()
+    conn.close()
+    print(f"\n[2/3] Daily status written: {db_path}")
+    print(f"    Total limit periods across all tickers: {total_limit_events}")
 
     # Generate summary statistics  # 生成汇总统计
-    print(f"\n[4/4] Summary Statistics")
+    print(f"\n[3/3] Summary Statistics")
     print("=" * 70)
     _print_summary_statistics(config, market_dir, nav_dir, total_limit_events)
 

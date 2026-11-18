@@ -13,7 +13,6 @@ Handles batch processing to avoid API rate limits.
 import os
 import time
 import math
-import sqlite3
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -37,8 +36,8 @@ class RealDataDownloader:
     在 DataLoader 期望的标准目录结构中创建数据：
     - market/{ticker}.parquet
     - nav/{ticker}.parquet
-    - config/fees.csv
-    - config/fund_status.db
+    - config/ (created empty; subscription_state.db and fund_terms.csv come from
+      scripts/build_corpus.py ... build_timeline.py and scripts/fund_terms.py)
 
     Attributes:
         output_dir: Root directory for downloaded data.  # 下载数据的根目录
@@ -257,158 +256,6 @@ class RealDataDownloader:
 
         return list(set(processed_tickers))
 
-    def _generate_fee_config(self, tickers: List[str]) -> None:
-        """Generate or update fee configuration file.
-        生成或更新费率配置文件。
-        """
-        csv_path = self.config_dir / "fees.csv"
-
-        new_data = []
-        for t in tickers:
-            new_data.append(
-                {
-                    "ticker": t,
-                    "fee_rate_tier_1": 0.015,
-                    "fee_limit_1": 500000,
-                    "fee_rate_tier_2": 0.010,
-                    "fee_limit_2": 2000000,
-                    "fee_fixed": 1000.0,
-                    "redeem_fee_7d": 0.015,
-                }
-            )
-        new_df = pd.DataFrame(new_data)
-
-        if csv_path.exists():
-            old_df = pd.read_csv(csv_path, dtype={"ticker": str})
-            combined = pd.concat([old_df, new_df])
-            combined = combined.drop_duplicates(subset=["ticker"], keep="last")
-            combined.to_csv(csv_path, index=False)
-        else:
-            new_df.to_csv(csv_path, index=False)
-
-    def _generate_limit_db(self) -> None:
-        """Create empty limit events database with enhanced schema.
-        创建带有增强模式的空限购事件数据库。
-
-        Includes is_open_ended computed column, source_announcement_ids for audit trail,
-        包含 is_open_ended 计算列、用于审计跟踪的 source_announcement_ids，
-        and proper indexes for query performance.
-        以及用于查询性能的适当索引。
-        """
-        db_path = self.config_dir / "fund_status.db"
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        # Create limit_events table with enhanced schema  # 创建带有增强模式的 limit_events 表
-        # - is_open_ended: computed column identifying open-ended limits (end_date IS NULL)  # is_open_ended: 识别开放式限购的计算列（end_date IS NULL）
-        # - source_announcement_ids: JSON array of announcement IDs that contributed to this event  # source_announcement_ids: 贡献于此事件的公告 ID 的 JSON 数组
-        # - reason: human-readable context for why the limit exists  # reason: 限购存在原因的可读说明
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS limit_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ticker TEXT NOT NULL,
-                start_date DATE NOT NULL,
-                end_date DATE,
-                max_amount REAL NOT NULL,
-                reason TEXT,
-                source_announcement_ids TEXT DEFAULT '[]',
-                is_open_ended INTEGER GENERATED ALWAYS AS (
-                    CASE WHEN end_date IS NULL THEN 1 ELSE 0 END
-                ) STORED
-            )
-        """)
-
-        # Create index on is_open_ended for efficient queries of open-ended limits  # 在 is_open_ended 上创建索引以高效查询开放式限购
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_limit_events_is_open_ended
-            ON limit_events(is_open_ended)
-        """)
-
-        # Create index on ticker for efficient lookups  # 在 ticker 上创建索引以高效查找
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_limit_events_ticker
-            ON limit_events(ticker)
-        """)
-
-        conn.commit()
-        conn.close()
-
-    def _create_announcement_parses_table(self) -> None:
-        """Create announcement_parses table for storing LLM extraction results.
-        创建 announcement_parses 表以存储 LLM 提取结果。
-
-        This table stores raw LLM extraction results from PDF announcements,
-        此表存储来自 PDF 公告的原始 LLM 提取结果，
-        supporting the PDF announcement processing pipeline.
-        支持 PDF 公告处理流水线。
-        """
-        db_path = self.config_dir / "fund_status.db"
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        # Create announcement_parses table  # 创建 announcement_parses 表
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS announcement_parses (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ticker TEXT NOT NULL,
-                announcement_date DATE NOT NULL,
-                pdf_filename TEXT NOT NULL,
-                parse_result TEXT,
-                parse_type TEXT,
-                confidence REAL,
-                processed INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        # Create indexes for query performance  # 创建用于查询性能的索引
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_announcement_parses_ticker
-            ON announcement_parses(ticker)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_announcement_parses_processed
-            ON announcement_parses(processed)
-        """)
-
-        # Create subscription_restrictions table (rich event stream from Kimi K2.5)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS subscription_restrictions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                fund_code TEXT NOT NULL,
-                fund_name TEXT,
-                announcement_date DATE NOT NULL,
-                effective_date DATE NOT NULL,
-                end_date DATE,
-                action TEXT NOT NULL CHECK(action IN (
-                    'restrict', 'suspend', 'resume', 'invalidate', 'adjust_rule'
-                )),
-                restriction_type TEXT CHECK(restriction_type IN (
-                    'amount_limit', 'full_suspension', 'holiday_suspension',
-                    'pre_holiday_suspension', 'application_invalid', 'rule_change'
-                )),
-                scope TEXT CHECK(scope IN ('large_only', 'all', 'partial_channel')),
-                limit_amount REAL,
-                affected_business TEXT DEFAULT '[]',
-                reason TEXT,
-                source_file TEXT NOT NULL,
-                fund_company TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_sr_fund_code
-            ON subscription_restrictions(fund_code)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_sr_fund_date
-            ON subscription_restrictions(fund_code, effective_date)
-        """)
-
-        conn.commit()
-        conn.close()
-
     def download(
         self, start_date: str, end_date: str, codes: Optional[List[str]] = None
     ) -> Tuple[int, List[str]]:
@@ -466,15 +313,10 @@ class RealDataDownloader:
             # Rate limiting  # 频率限制
             time.sleep(0.5)
 
-        # Generate config files  # 生成配置文件
         print(
             f"\n>>> All batches complete. Total processed: {len(all_processed_tickers)} funds."
         )
         if all_processed_tickers:
-            print(">>> Updating configuration files...")
-            self._generate_fee_config(all_processed_tickers)
-            self._generate_limit_db()
-            self._create_announcement_parses_table()
             print(f"\n[SUCCESS] Download complete! Data path: {self.output_dir}")
         else:
             print("\n[WARN] No valid data downloaded.")

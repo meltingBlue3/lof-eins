@@ -6,6 +6,8 @@
 
 ## 怎么重跑
 
+阶段 G 删除了旧链路，`legacy` 候选也随之去掉，本节的旧数据报告只能在提交 `17a5bfd` 上重跑：
+
 ```bash
 python scripts/eval_timeline.py --candidate legacy --trades output/20260413_154550/trade_logs.csv --out docs/eval/legacy-baseline.md
 ```
@@ -14,11 +16,15 @@ python scripts/eval_timeline.py --candidate legacy --trades output/20260413_1545
 python scripts/red_flags.py --candidate legacy --out docs/eval/legacy-red-flags.md
 ```
 
+现在的代码上，同样两条命令默认评估新时间线（`v2`）：
+
+```bash
+python scripts/eval_timeline.py --out docs/eval/v2-timeline.md
+```
+
 ```bash
 python -m pytest tests/test_evaluation.py -q
 ```
-
-新版流水线产出 `daily_status` 以后，在 `src/evaluation/candidates.py` 里注册一个新候选，用同样的两条命令就能对比。
 
 ## 金标集（19 只基金）
 
@@ -185,7 +191,7 @@ python -m pytest tests/test_evaluation.py -q
    python run_backtest.py --sensitivity
    ```
 
-7. **阶段 G（清理）**：删除旧链路，更新文档。
+7. ~~**阶段 G（清理）**~~ 已完成：旧链路已删除，`legacy` 候选随之去掉（上面阶段 A 的旧数据报告是在提交 `17a5bfd` 上生成的）。模拟数据改为写 `daily_status`，用法见项目 [README](../../README.md)。
 
 ## 阶段 D 结果：新时间线（`v2`）对照金标
 
