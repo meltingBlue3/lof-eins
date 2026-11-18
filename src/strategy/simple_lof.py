@@ -18,12 +18,13 @@ class SimpleLOFStrategy(BaseStrategy):
     简单LOF溢价套利策略。
 
     Strategy Logic:
-    - SELL: If holding any position, sell all immediately (clearance ASAP).
-    - BUY: If premium_rate > buy_threshold AND daily_limit > 0, buy maximum possible.
+    - SELL: If holding any settled position, sell all immediately (clearance ASAP).
+    - BUY: If the decision premium > buy_threshold (and <= max_premium_rate when set)
+      AND daily_limit > 0, buy the maximum the engine allows.
 
     策略逻辑：
-    - 卖出：如果持有任何仓位，立即全部卖出（尽快清仓）
-    - 买入：如果溢价率 > 买入阈值 且 申购限额 > 0，买入最大可能金额
+    - 卖出：如果持有已结算份额，立即全部卖出（尽快清仓）
+    - 买入：如果决策溢价 > 买入阈值（设置了 max_premium_rate 时还要不超过它）且申购上限 > 0，按引擎允许的最大金额买入
 
     This strategy prioritizes position clearance over new entries.
     此策略优先清仓而非建仓。
@@ -65,6 +66,10 @@ class SimpleLOFStrategy(BaseStrategy):
         # The premium known at the decision cut-off when the engine provides it  # 决策时可知的溢价
         premium_rate = row["decision_premium"] if "decision_premium" in row.index else row["premium_rate"]
         daily_limit = row["daily_limit"]
+
+        # Optional ceiling: skip premiums above max_premium_rate  # 可选上限：溢价超过 max_premium_rate 不买
+        if pd.isna(premium_rate) or (config.max_premium_rate is not None and premium_rate > config.max_premium_rate):
+            return signals
 
         if premium_rate > config.buy_threshold and daily_limit > 0:
             signals.append(

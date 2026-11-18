@@ -441,82 +441,36 @@ class BacktestEngine:
             # Step 1: Settle T+2 positions  # 步骤1：结算T+2持仓
             account.update_date(current_date)
 
-            # Step 2: SELL Phase - sell all settled (T+2) shares immediately.
-            # This is intentional: LOF arbitrage buys off-exchange at NAV on day T,
-            # shares settle on T+2, then are sold on-exchange at market price on T+2.
-            # Only settled shares are sold; shares bought on T+1 remain pending.
-            # 步骤2：卖出阶段 - 立即卖出所有已结算（T+2）份额
-            # 这是有意设计的：LOF套利在T日以净值场外买入，份额在T+2日结算，然后在T+2日以市价场内卖出
-            # 只有已结算的份额可以卖出；T+1日买入的份额仍处于待结算状态
-            for ticker in ticker_list:
-                if ticker not in all_data or timestamp not in all_data[ticker].index:
-                    continue
+            # Step 2: Ask the strategy, fund by fund, with today's row and the settled positions
+            # 步骤2：逐只基金询问策略，传入当日数据和已结算持仓
+            sells, buys = self._collect_signals(all_data, ticker_list, timestamp, account)
 
-                row = all_data[ticker].loc[timestamp]
-                available_shares = account.get_available_shares(ticker)
+            # Step 3: SELL phase - sells first, so their cash can fund today's buys
+            # (cash from a sale is available at once; see Account.sell)
+            # 步骤3：先卖出，卖出所得资金当日即可用于买入
+            for signal, row in sells:
+                trade = self._execute_sell(account=account, signal=signal, row=row, current_date=current_date)
+                if trade:
+                    trade_records.append(trade)
 
-                if available_shares > 0:
-                    signal = Signal(action="sell", ticker=ticker, amount=float("inf"))
-                    trade = self._execute_sell(
-                        account=account,
-                        signal=signal,
-                        row=row,
-                        current_date=current_date,
-                    )
-                    if trade:
-                        trade_records.append(trade)
-
-            # Step 3: BUY Phase - collect candidates, sort by premium_rate, buy greedily
-            # 步骤3：买入阶段 - 收集候选、按溢价率排序、贪婪买入
-            buy_candidates = []
-
-            for ticker in ticker_list:
-                if ticker not in all_data or timestamp not in all_data[ticker].index:
-                    continue
-
-                row = all_data[ticker].loc[timestamp]
-                premium_rate = row["decision_premium"]  # what is known at the cut-off  # 决策时可知的溢价
-                daily_limit = row["daily_limit"]
-
-                # Filter: must exceed threshold and have positive limit  # 过滤：必须超过阈值且有正限额
-                # Optional: skip if premium exceeds max_premium_rate  # 可选：溢价率超过上限则跳过
-                if pd.isna(premium_rate):
-                    continue
-                if self.config.max_premium_rate is not None and premium_rate > self.config.max_premium_rate:
-                    continue
-                if premium_rate > self.config.buy_threshold and daily_limit > 0:
-                    buy_candidates.append(
-                        {
-                            "ticker": ticker,
-                            "premium_rate": premium_rate,
-                            "row": row,
-                            "fee_config": all_fees.get(ticker, {}),
-                        }
-                    )
-
-            # Sort by premium_rate descending (highest first)  # 按溢价率降序排列（最高的优先）
-            buy_candidates.sort(key=lambda x: x["premium_rate"], reverse=True)
-
-            # Greedy buy: iterate until cash exhausted  # 贪婪买入：迭代直到现金耗尽
-            for candidate in buy_candidates:
+            # Step 4: BUY phase - highest decision premium first, greedy until cash runs out; every order
+            # is capped by the purchase limit, liquidity, cash and the per-order cap (_execute_buy)
+            # 步骤4：买入阶段 - 按决策溢价从高到低贪婪买入；每笔受限额、流动性、现金和单笔上限约束
+            for signal, row in buys:
                 if account.cash <= 0:
                     break
-
-                signal = Signal(
-                    action="buy", ticker=candidate["ticker"], amount=float("inf")
-                )
                 trade = self._execute_buy(
                     account=account,
                     signal=signal,
-                    row=candidate["row"],
-                    fee_config=candidate["fee_config"],
+                    row=row,
+                    fee_config=all_fees.get(signal.ticker, {}),
                     trading_days=trading_days,
                     current_date=current_date,
                 )
                 if trade:
                     trade_records.append(trade)
 
-            # Step 4: Record daily performance  # 步骤4：记录每日表现
+            # Step 5: Record daily performance  # 步骤5：记录每日表现
             # Update forward-filled price cache with today's available closes  # 用今日可用收盘价更新前向填充的价格缓存
             for ticker in ticker_list:
                 if ticker in all_data and timestamp in all_data[ticker].index:
@@ -563,6 +517,48 @@ class BacktestEngine:
             config=self.config,
             daily_snapshots=daily_snapshots,
         )
+
+    def _collect_signals(
+        self,
+        all_data: Dict[str, pd.DataFrame],
+        ticker_list: List[str],
+        timestamp: pd.Timestamp,
+        account: Account,
+    ) -> Tuple[List[Tuple[Signal, pd.Series]], List[Tuple[Signal, pd.Series]]]:
+        """Today's strategy signals: (sells in fund order, buys by decision premium, highest first).
+
+        当日策略信号：卖出按基金顺序，买入按决策溢价从高到低。
+
+        The strategy sees each fund's row for the day (``daily_limit`` already under
+        unknown_policy) and the settled positions; shares still pending settlement are not
+        in ``positions`` and cannot be sold. Several buy signals for one fund on one day are
+        merged into one order (amounts added), so the day's purchase limit applies once.
+        """
+        positions = dict(account.positions)
+        sells: List[Tuple[Signal, pd.Series]] = []
+        buys: Dict[str, Tuple[Signal, pd.Series]] = {}
+        for ticker in ticker_list:
+            if ticker not in all_data or timestamp not in all_data[ticker].index:
+                continue
+            row = all_data[ticker].loc[timestamp]
+            for signal in self.strategy.generate_signals(row, positions, self.config):
+                if signal.ticker != ticker:
+                    raise ValueError(f"{type(self.strategy).__name__} returned a signal for {signal.ticker} "
+                                     f"on the bar of {ticker}")
+                if signal.action == "sell":
+                    sells.append((signal, row))
+                elif ticker in buys:
+                    merged = buys[ticker][0].amount + signal.amount
+                    buys[ticker] = (Signal(action="buy", ticker=ticker, amount=merged), row)
+                else:
+                    buys[ticker] = (signal, row)
+
+        def premium(item: Tuple[Signal, pd.Series]) -> float:
+            value = item[1]["decision_premium"]
+            return float("-inf") if pd.isna(value) else float(value)
+
+        ordered = sorted(buys.values(), key=premium, reverse=True)  # stable: ties keep fund order
+        return sells, ordered
 
     def _execute_sell(
         self, account: Account, signal: Signal, row: pd.Series, current_date: date

@@ -215,7 +215,42 @@ python run_backtest.py -c configs/mock_backtest.yaml
 
 默认费率：50 万以下 1.5%，200 万以下 1.0%，以上每笔 1000 元。
 
-**注意**：买卖规则写在 `BacktestEngine.run` 里，`SimpleLOFStrategy` 和 `BaseStrategy.generate_signals` 目前并没有被引擎调用。只实现一个新的策略类不会改变回测结果，要换策略得同时改引擎。
+买卖决策来自策略：引擎每个基金每个交易日调用一次 `strategy.generate_signals(row, positions, config)`，各项上限由引擎负责。`SimpleLOFStrategy` 的规则是：已结算的份额全部卖出；决策溢价超过阈值（设置了 `max_premium_rate` 时还要不超过它）且申购上限大于 0 时，按允许的最大金额买入。
+
+### 自定义策略
+
+```python
+from typing import Dict, List
+
+import pandas as pd
+
+from src.config import BacktestConfig
+from src.strategy.base import BaseStrategy, Signal
+
+
+class FeeAwareStrategy(BaseStrategy):
+    """只在决策溢价比申购费高出 1 个百分点以上时买入。"""
+
+    def generate_signals(self, row: pd.Series, positions: Dict[str, float], config: BacktestConfig) -> List[Signal]:
+        ticker = row["ticker"]
+        signals = []
+        if positions.get(ticker, 0) > 0:
+            signals.append(Signal("sell", ticker, float("inf")))           # 已到账的份额全部卖出
+        premium = row["decision_premium"]
+        if pd.notna(premium) and premium > 0.015 + 0.01 and row["daily_limit"] > 0:
+            signals.append(Signal("buy", ticker, float("inf")))            # inf = 引擎允许的最大金额
+        return signals
+```
+
+- `row` 是该基金当天的一行：`close`、`nav`、`premium_rate`（T 日净值，有前视）、`decision_premium`（按 `premium_basis` 应使用的溢价）、`daily_limit`（已按 `unknown_policy` 和 `n_accounts` 换算）、`sub_status`、`status_source`、`volume` 等。
+- `positions` 只包含已结算的份额；还在等待到账的份额不在里面，也不能卖。
+- 买入金额以元计，卖出金额也以元计（`inf` 表示全部）。
+- 引擎的约束：
+  - 先执行全部卖出，再按决策溢价从高到低执行买入；
+  - 每笔买入受当日申购上限、流动性、现金和 10 万元单笔上限约束；
+  - 同一基金同一天的多个买入信号合并为一笔；
+  - 信号只能针对当天这一行的基金，否则报错。
+- `--bounds` 的利润归因按"第 k 次卖出对应第 k 次买入"配对。分批卖出的策略配不上对的往返会被跳过，归因只是近似。
 
 ### 使用示例
 
@@ -256,6 +291,7 @@ python -m pytest tests/
 | `test_evaluation.py` | 金标对照、红旗、利润归因 |
 | `test_backtest_status.py` | 加载器、两个边界、模拟数据端到端 |
 | `test_phase_f.py` | 交易条款、申购费、可卖日、无前视的决策溢价 |
+| `test_strategy_engine.py` | 引擎通过策略交易、对任何策略都施加的上限 |
 | `test_architecture_fixes.py` | 加载器返回值、T+2 结算、成交记录 |
 
 ## 旧链路

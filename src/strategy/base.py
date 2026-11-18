@@ -44,9 +44,17 @@ class BaseStrategy(ABC):
     Subclasses must implement the generate_signals method to produce
     trading signals based on market data and current positions.
 
+    BacktestEngine calls it once per fund per trading day. It executes all sells first,
+    then the buys from the highest decision premium down, and caps every order by the
+    day's purchase limit, liquidity, cash and 100,000 yuan; several buys for one fund
+    on one day become one order. A strategy decides what to trade, never how much the
+    rules allow.
+
     交易策略的抽象基类。
 
     子类必须实现generate_signals方法，根据市场数据和当前持仓生成交易信号。
+    引擎每个基金每个交易日调用一次：先执行全部卖出，再按决策溢价从高到低执行买入，
+    每笔都受当日申购上限、流动性、现金和 10 万元单笔上限约束；同一基金同一天的多个买入合并为一笔。
     """
 
     @abstractmethod
@@ -61,11 +69,16 @@ class BaseStrategy(ABC):
             row: Current bar data containing at minimum: / 当前K线数据，至少包含：
                 - ticker: Fund ticker symbol / 基金代码
                 - close: Closing price / 收盘价
-                - nav: Net asset value / 净值
-                - premium_rate: (close - nav) / nav / 溢价率
-                - daily_limit: Maximum subscription amount (inf if unlimited) / 最大申购金额（无限则为inf）
+                - nav: Net asset value of the day (published after the close) / 当日净值（收盘后才公布）
+                - premium_rate: (close - nav) / nav, uses the day's NAV (look-ahead) / 溢价率（用当日净值，有前视）
+                - decision_premium: the premium the buy decision should use under
+                  config.premium_basis / 按 premium_basis 应使用的决策溢价
+                - daily_limit: purchase cap for the day under unknown_policy and n_accounts
+                  (inf unlimited, 0 closed) / 当日申购上限（已按 unknown_policy 换算）
+                - sub_status, status_source: the day's subscription status / 当日申购状态和来源
                 - volume: Trading volume / 成交量
-            positions: Current holdings as {ticker: shares}. / 当前持仓 {基金代码: 份额}
+            positions: Settled holdings as {ticker: shares}; shares still pending settlement
+                are not included and cannot be sold. / 已结算持仓，待结算份额不在其中，也不能卖出
             config: Backtest configuration. / 回测配置
 
         Returns:
