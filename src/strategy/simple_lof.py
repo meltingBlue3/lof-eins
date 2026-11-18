@@ -62,7 +62,8 @@ class SimpleLOFStrategy(BaseStrategy):
 
         # BUY: If premium_rate exceeds threshold and subscription is allowed
         # 买入：如果溢价率超过阈值且允许申购
-        premium_rate = row["premium_rate"]
+        # The premium known at the decision cut-off when the engine provides it  # 决策时可知的溢价
+        premium_rate = row["decision_premium"] if "decision_premium" in row.index else row["premium_rate"]
         daily_limit = row["daily_limit"]
 
         if premium_rate > config.buy_threshold and daily_limit > 0:

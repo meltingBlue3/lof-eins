@@ -21,40 +21,79 @@ from src.strategy.base import BaseStrategy, Signal
 logger = logging.getLogger(__name__)
 
 
-def calculate_subscription_fee(amount: float, attrs: Dict[str, Any]) -> float:
+INFERRED_SOURCES = ("inferred_open", "inferred_prior")
+
+
+def effective_daily_limit(df: pd.DataFrame, unknown_policy: str, n_accounts: int) -> pd.Series:
+    """Purchase cap the engine trades against, from the loader's stated cap and status.
+
+    引擎实际使用的申购上限：由加载器给出的限额和状态，按 unknown_policy 换算。
+
+    - closed -> 0; open -> inf; limited -> amount x n_accounts
+    - unproven days (no number, or a permissive status that was only inferred) -> 0 under
+      unknown_policy='closed', inf under 'open' (an inferred limit keeps its amount there)
+    """
+    stated = df["daily_limit"].astype(float)
+    source = df["status_source"] if "status_source" in df else pd.Series("legacy", index=df.index)
+    cap = stated.where(~np.isfinite(stated) | (stated <= 0), stated * n_accounts)
+    inferred = source.isin(INFERRED_SOURCES) & (stated > 0)
+    unproven = stated.isna() | inferred
+    if unknown_policy == "closed":
+        return cap.mask(unproven, 0.0)
+    return cap.mask(stated.isna(), np.inf)
+
+
+def calculate_subscription_fee(amount: float, attrs: Dict[str, Any], discount: float = 1.0) -> float:
     """Calculate tiered subscription fee based on amount.
 
     根据金额计算阶梯式申购费。
 
-    Fee tiers (from df.attrs):
+    With ``sub_fee_tiers`` (a fund's own table, [[upper_bound, rate, fixed_fee], ...] in
+    order), the first tier whose upper bound exceeds the amount applies. Otherwise the
+    legacy three tiers from fees.csv:
     - Tier 1: amount < fee_limit_1 -> fee_rate_tier_1
     - Tier 2: fee_limit_1 <= amount < fee_limit_2 -> fee_rate_tier_2
     - Tier 3: amount >= fee_limit_2 -> fee_fixed (flat fee)
 
-    费率档位（来自df.attrs）：
-    - 第一档：金额 < 50万 -> 1.5%
-    - 第二档：50万 <= 金额 < 200万 -> 1.0%
-    - 第三档：金额 >= 200万 -> 固定1000元
+    ``fee_formula="net"`` is the prospectus formula (net amount = amount / (1 + rate), fee =
+    amount - net amount); the legacy default charges amount x rate. ``discount`` scales the
+    rate, not a fixed fee.
+
+    费率档位：有 sub_fee_tiers 时按基金自己的费率表；否则按 fees.csv 的三档。
+    fee_formula="net" 为招募说明书的外扣法；discount 只打折比例费率，不打折固定费用。
 
     Args:
         amount: Subscription amount in CNY. / 申购金额（人民币）
-        attrs: DataFrame attrs containing fee configuration. / DataFrame属性（包含费用配置）
+        attrs: Fee configuration. / 费用配置
+        discount: Multiplier on the rate. / 费率折扣
 
     Returns:
         Calculated fee in CNY. / 计算的费用（人民币）
     """
-    fee_limit_1 = attrs.get("fee_limit_1", 500_000.0)
-    fee_limit_2 = attrs.get("fee_limit_2", 2_000_000.0)
-    fee_rate_tier_1 = attrs.get("fee_rate_tier_1", 0.015)
-    fee_rate_tier_2 = attrs.get("fee_rate_tier_2", 0.01)
-    fee_fixed = attrs.get("fee_fixed", 1000.0)
-
-    if amount < fee_limit_1:
-        return amount * fee_rate_tier_1
-    elif amount < fee_limit_2:
-        return amount * fee_rate_tier_2
+    tiers = attrs.get("sub_fee_tiers")
+    if tiers:
+        rate, fixed = tiers[-1][1], tiers[-1][2]
+        for upper, tier_rate, tier_fixed in tiers:
+            if amount < upper:
+                rate, fixed = tier_rate, tier_fixed
+                break
     else:
-        return fee_fixed
+        fee_limit_1 = attrs.get("fee_limit_1", 500_000.0)
+        fee_limit_2 = attrs.get("fee_limit_2", 2_000_000.0)
+        fixed = None
+        if amount < fee_limit_1:
+            rate = attrs.get("fee_rate_tier_1", 0.015)
+        elif amount < fee_limit_2:
+            rate = attrs.get("fee_rate_tier_2", 0.01)
+        else:
+            rate, fixed = None, attrs.get("fee_fixed", 1000.0)
+
+    if fixed is not None:
+        return fixed
+    rate = rate * discount
+    if attrs.get("fee_formula") == "net":
+        return amount - amount / (1 + rate)
+    return amount * rate
 
 
 @dataclass
@@ -285,7 +324,8 @@ class BacktestEngine:
         Returns:
             Tuple of: / 元组包含：
             - Dict mapping ticker to DataFrame with market data / 基金代码到行情DataFrame的映射
-            - Dict mapping ticker to fee configuration / 基金代码到费用配置的映射
+            - Dict mapping ticker to its fee configuration plus ``sell_days`` and
+              ``fee_source`` (chosen by config.fees / config.settlement) / 基金代码到费用配置和可卖日的映射
             - DatetimeIndex of aligned trading days (union of all tickers) / 对齐的交易日索引（所有基金的并集）
         """
         all_data: Dict[str, pd.DataFrame] = {}
@@ -294,13 +334,30 @@ class BacktestEngine:
         for ticker in tickers:
             bundle = self.data_loader.load_bundle(ticker, start_date, end_date)
             df = bundle.df
-            all_fees[ticker] = bundle.fee_config
+            terms = self.data_loader.load_terms(ticker)
+            own_fees = self.config.fees == "fund" and "sub_fee_tiers" in terms
+            all_fees[ticker] = {
+                **(terms if own_fees else bundle.fee_config),
+                "fee_source": terms["terms_source"] if own_fees else "default",
+                "sell_days": terms["sell_days"] if self.config.settlement == "fund" else 2,
+            }
+
+            # Premium the buy decision uses  # 买入决策使用的溢价
+            df["decision_premium"] = (df["premium_rate"] if self.config.premium_basis == "same_day"
+                                      else df["premium_published"])
 
             # Pre-compute MA5 volume  # 预计算5日均量
             if self.config.use_ma5_liquidity:
                 df["ma5_volume"] = df["volume"].rolling(5, min_periods=1).mean()
             else:
                 df["ma5_volume"] = df["volume"]
+
+            # Purchase cap under the configured policy  # 按配置的策略换算申购上限
+            if "sub_status" not in df:
+                df["sub_status"] = "legacy"
+                df["status_source"] = "legacy"
+            df["stated_limit"] = df["daily_limit"]
+            df["daily_limit"] = effective_daily_limit(df, self.config.unknown_policy, self.config.n_accounts)
 
             # Add ticker column  # 添加基金代码列
             df["ticker"] = ticker
@@ -421,11 +478,13 @@ class BacktestEngine:
                     continue
 
                 row = all_data[ticker].loc[timestamp]
-                premium_rate = row["premium_rate"]
+                premium_rate = row["decision_premium"]  # what is known at the cut-off  # 决策时可知的溢价
                 daily_limit = row["daily_limit"]
 
                 # Filter: must exceed threshold and have positive limit  # 过滤：必须超过阈值且有正限额
                 # Optional: skip if premium exceeds max_premium_rate  # 可选：溢价率超过上限则跳过
+                if pd.isna(premium_rate):
+                    continue
                 if self.config.max_premium_rate is not None and premium_rate > self.config.max_premium_rate:
                     continue
                 if premium_rate > self.config.buy_threshold and daily_limit > 0:
@@ -643,7 +702,7 @@ class BacktestEngine:
         max_amount = min(max_amount, account.cash)
 
         # Calculate fee  # 计算费用
-        fee = calculate_subscription_fee(max_amount, fee_config)
+        fee = calculate_subscription_fee(max_amount, fee_config, self.config.fee_discount)
 
         # Ensure amount covers fee  # 确保金额覆盖费用
         if max_amount <= fee:
@@ -658,12 +717,14 @@ class BacktestEngine:
         daily_limit = row["daily_limit"]
         cash_before = account.cash
 
+        sell_days = int(fee_config.get("sell_days", 2))
         shares = account.buy(
             ticker=ticker,
             amount=max_amount,
             nav=nav,
             fee=fee,
             trading_days=trading_days,
+            settle_days=sell_days,
         )
 
         return {
@@ -676,7 +737,13 @@ class BacktestEngine:
             "fee": fee,
             "net_amount": max_amount - fee,
             "premium_rate": premium_rate,
+            "decision_premium": row.get("decision_premium", premium_rate),
+            "fee_source": fee_config.get("fee_source", "default"),
+            "sell_days": sell_days,
             "daily_limit": daily_limit,
+            "sub_status": row.get("sub_status", "legacy"),
+            "status_source": row.get("status_source", "legacy"),
+            "stated_limit": row.get("stated_limit", daily_limit),
             "limit_cap": limit_cap,
             "liquid_cap": liquid_cap,
             "cash_cap": cash_cap,

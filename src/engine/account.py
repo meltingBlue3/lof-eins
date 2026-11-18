@@ -151,8 +151,9 @@ class Account:
         nav: float,
         fee: float,
         trading_days: List[date],
+        settle_days: int = 2,
     ) -> float:
-        """Execute a buy order with T+2 settlement.
+        """Execute a buy order with T+``settle_days`` settlement (default T+2).
 
         执行买入订单（T+2结算）。
 
@@ -166,6 +167,7 @@ class Account:
             nav: NAV for share calculation. / 用于计算份额的净值
             fee: Subscription fee (already calculated). / 申购费（已计算）
             trading_days: List of trading days for T+2 calculation. / 交易日列表（用于T+2计算）
+            settle_days: Trading days until the shares can be sold (QDII LOFs: 3). / 份额可卖出前的交易日数
 
         Returns:
             Number of shares purchased. / 购买的份额数量
@@ -185,8 +187,8 @@ class Account:
         # Deduct cash
         self.cash -= amount
 
-        # Calculate T+2 settlement date
-        settle_date = self._calculate_t2_date(trading_days)
+        # Calculate settlement date
+        settle_date = self._calculate_settle_date(trading_days, settle_days)
 
         # Add to pending queue
         self.pending.append(
@@ -206,15 +208,20 @@ class Account:
         return shares
 
     def _calculate_t2_date(self, trading_days: List[date]) -> date:
-        """Calculate T+2 settlement date based on trading calendar.
+        """Calculate T+2 settlement date based on trading calendar. / 基于交易日历计算T+2结算日期"""
+        return self._calculate_settle_date(trading_days, 2)
 
-        基于交易日历计算T+2结算日期。
+    def _calculate_settle_date(self, trading_days: List[date], settle_days: int) -> date:
+        """Calculate the T+n settlement date based on trading calendar.
+
+        基于交易日历计算T+n结算日期。
 
         Args:
             trading_days: Sorted list of trading days. / 排序后的交易日列表
+            settle_days: n. / 交易日数
 
         Returns:
-            Settlement date (T+2 trading days from current date). / 结算日期（当前日期后2个交易日）
+            Settlement date (n trading days from current date). / 结算日期（当前日期后n个交易日）
         """
         if self._current_date is None:
             raise ValueError("Current date not set. Call update_date first.")
@@ -224,17 +231,17 @@ class Account:
             current_idx = trading_days.index(self._current_date)
         except ValueError:
             # Current date not in trading days, use fallback  # 当前日期不在交易日列表中，使用回退方案
-            return self._current_date + timedelta(days=2)
+            return self._current_date + timedelta(days=settle_days)
 
-        # T+2 means 2 trading days after current  # T+2表示当前日期后2个交易日
-        settle_idx = current_idx + 2
+        # T+n means n trading days after current  # T+n表示当前日期后n个交易日
+        settle_idx = current_idx + settle_days
 
         if settle_idx < len(trading_days):
             return trading_days[settle_idx]
         else:
             # Beyond available trading days, estimate  # 超出可用交易日，估算
             return self._current_date + timedelta(
-                days=4
+                days=2 * settle_days
             )  # Conservative estimate  # 保守估计
 
     def get_available_shares(self, ticker: str) -> float:

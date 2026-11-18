@@ -28,6 +28,17 @@ use_ma5_liquidity: true
 # Annual risk-free rate for Sharpe ratio calculation (2% = 0.02)
 risk_free_rate: 0.02
 
+# Timing and costs (redesign §8.4, phase F)
+# Premium the buy decision uses: published = newest NAV visible at the T 15:00 cut-off
+# (T-1, or T-2 for overseas funds); same_day = the T NAV, only published after the close (look-ahead)
+premium_basis: published
+# Subscription fees: fund = each fund's own tiers (config/fund_terms.csv); default = 1.5% for every fund
+fees: fund
+# Sell day of subscribed shares: fund = each fund's own (QDII T+3); t2 = T+2 for every fund
+settlement: fund
+# Multiplier on percentage subscription fees (1.0 = prospectus rate, 0.1 = 10% of it)
+fee_discount: 1.0
+
 # ===========================
 # Runtime parameters (not part of BacktestConfig, read by run_backtest.py)
 # ===========================

@@ -1,17 +1,46 @@
 """
 DataLoader for LOF Fund Arbitrage Backtesting System.
 
-Reads market data, NAV, limit events, and fees from disk and provides
+Reads market data, NAV, subscription status, and fees from disk and provides
 unified data access for backtesting.
 
 LOF基金套利回测系统的数据加载器。
 
-从磁盘读取行情数据、净值、限购事件和费用信息，为回测提供统一的数据访问接口。
+从磁盘读取行情数据、净值、申购状态和费用信息，为回测提供统一的数据访问接口。
+
+Subscription status comes from one of two sources (``limits``):
+
+- ``daily_status``: the v2 pipeline's table in ``config/subscription_state.db``
+  (redesign §5, phase D). Each day carries ``sub_status`` (open / limited / closed /
+  unknown), ``status_source`` (change / restatement / overlay / inferred_prior /
+  inferred_open / default) and ``daily_limit`` -- the stated cap in yuan: inf when
+  open, 0 when closed, the amount when limited, and NaN when no number is known
+  (unknown, or a limit without an amount). The loader applies no policy: the
+  engine decides what NaN and inferred states mean (BacktestConfig.unknown_policy).
+- ``legacy``: the old ``limit_events`` table in ``config/fund_status.db``, kept for
+  the mock data and for comparison until phase G. Every day has a number there
+  (no unknown), ``status_source`` is ``legacy``.
+
+``auto`` (the default) uses daily_status when that table exists, legacy otherwise.
+
+Trading terms (``terms``, redesign §8.4, phase F) come from ``config/fund_terms.csv``
+(scripts/fund_terms.py) when it exists: per-fund subscription fee tiers, the day the
+subscribed shares can be sold (``sell_days``) and the lag of the newest NAV visible at
+decision time (``nav_lag``). Funds missing there, and ``terms="default"``, get the old
+assumptions: fees.csv / 1.5%, sell at T+2, NAV lag 1. The loader adds
+``premium_published`` -- close over that visible NAV -- next to the same-day
+``premium_rate``; the engine picks one (BacktestConfig.premium_basis).
 """
 
 import sqlite3
 from pathlib import Path
-from typing import Dict, List, NamedTuple, Optional
+from typing import Any, Dict, List, NamedTuple, Optional
+
+from src.data import fund_terms
+
+LIMIT_SOURCES = ("auto", "daily_status", "legacy")
+TERMS_SOURCES = ("auto", "fund", "default")
+DEFAULT_TERMS: Dict[str, Any] = {"sell_days": 2, "nav_lag": 1, "terms_source": "default"}
 
 import numpy as np
 import pandas as pd
@@ -24,8 +53,9 @@ class BundleResult(NamedTuple):
 
     Attributes:
         df: DataFrame with market data (open, high, low, close, volume, nav,
-            premium_rate, daily_limit). / 行情数据DataFrame
-        fee_config: Fee configuration dict for the ticker. / 费用配置字典
+            premium_rate, daily_limit, sub_status, status_source). / 行情数据DataFrame
+        fee_config: Fee configuration dict for the ticker (fees.csv or defaults; the fund's own
+            tiers are in DataLoader.load_terms). / 费用配置字典
     """
 
     df: pd.DataFrame
@@ -42,16 +72,25 @@ class DataLoader:
         _fees_cache: Cached fee configuration DataFrame. / 缓存的费用配置DataFrame
     """
 
-    def __init__(self, data_dir: str = "./data/mock"):
+    def __init__(self, data_dir: str = "./data/mock", limits: str = "auto", terms: str = "auto"):
         """Initialize DataLoader with data directory.
 
         使用数据目录初始化DataLoader。
 
         Args:
             data_dir: Path to directory containing mock data. / 包含模拟数据的目录路径
+            limits: "auto", "daily_status" or "legacy" -- where subscription status comes from
+                (see the module docstring). / 申购状态的来源
+            terms: "auto", "fund" or "default" -- where trading terms come from. / 交易条款的来源
         """
+        if limits not in LIMIT_SOURCES:
+            raise ValueError(f"limits must be one of {LIMIT_SOURCES}, got {limits!r}")
+        if terms not in TERMS_SOURCES:
+            raise ValueError(f"terms must be one of {TERMS_SOURCES}, got {terms!r}")
         self.data_dir = Path(data_dir)
         self._fees_cache: Optional[pd.DataFrame] = None
+        self._status_conn: Optional[sqlite3.Connection] = None
+        self._terms: Optional[Dict[str, Dict]] = None
 
         # Validate directory structure  # 验证目录结构
         required_dirs = ["market", "nav", "config"]
@@ -59,6 +98,45 @@ class DataLoader:
             dir_path = self.data_dir / dir_name
             if not dir_path.exists():
                 raise FileNotFoundError(f"Required directory not found: {dir_path}")
+        self.limits = self._resolve_limits(limits)
+        if terms == "fund" and not self.terms_file.exists():
+            raise FileNotFoundError(f"{self.terms_file} not found; run scripts/fund_terms.py fetch && build")
+        self.terms_mode = "fund" if terms == "fund" or (terms == "auto" and self.terms_file.exists()) else "default"
+
+    @property
+    def status_db(self) -> Path:
+        return self.data_dir / "config" / "subscription_state.db"
+
+    @property
+    def terms_file(self) -> Path:
+        return self.data_dir / "config" / fund_terms.TERMS_FILE
+
+    def load_terms(self, ticker: str) -> Dict[str, Any]:
+        """Trading terms of one fund; the old assumptions when it has none (see the module docstring)."""
+        if self.terms_mode == "default":
+            return dict(DEFAULT_TERMS)
+        if self._terms is None:
+            self._terms = fund_terms.read_terms(self.terms_file)
+        row = self._terms.get(str(ticker))
+        if row is None:
+            return dict(DEFAULT_TERMS)
+        return {"sell_days": row["sell_days"], "nav_lag": row["nav_lag"], "terms_source": row["source"],
+                "sub_fee_tiers": row["sub_fee_tiers"], "fee_formula": "net"}
+
+    def _resolve_limits(self, limits: str) -> str:
+        has_table = False
+        if self.status_db.exists():
+            conn = sqlite3.connect(f"file:{self.status_db.as_posix()}?mode=ro", uri=True)
+            try:
+                has_table = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'daily_status'").fetchone() is not None
+            finally:
+                conn.close()
+        if limits == "daily_status" and not has_table:
+            raise FileNotFoundError(f"daily_status table not found in {self.status_db}; run scripts/build_timeline.py build")
+        if limits == "auto":
+            return "daily_status" if has_table else "legacy"
+        return limits
 
     def load_bundle(
         self,
@@ -114,12 +192,21 @@ class DataLoader:
         # Calculate premium rate  # 计算溢价率
         df["premium_rate"] = (df["close"] - df["nav"]) / df["nav"]
 
-        # Load and resample limit events to daily series  # 加载限购事件并重采样为日序列
-        daily_limits = self._resample_limits_to_daily(ticker, df.index)
-        df["daily_limit"] = daily_limits
-
-        # Apply forward fill to handle any NaN values  # 前向填充处理NaN值
+        # Forward fill market/NAV gaps only: a missing limit means "not known", never yesterday's value
+        # 只对行情和净值前向填充：限额缺失表示"未知"，不能沿用前一天的值
         df = df.ffill()
+
+        # Premium on the newest NAV a buyer can see at the T 15:00 cut-off (no look-ahead)
+        # 决策时点可见的最新净值计算的溢价（无前视）
+        terms = self.load_terms(ticker)
+        df["nav_published"] = df["nav"].shift(terms["nav_lag"])
+        df["premium_published"] = (df["close"] - df["nav_published"]) / df["nav_published"]
+
+        # Subscription status per day  # 每日申购状态
+        status = self.load_status(ticker, df.index)
+        df["daily_limit"] = status["daily_limit"]
+        df["sub_status"] = status["sub_status"]
+        df["status_source"] = status["status_source"]
 
         # Apply date filtering if specified  # 如果指定了日期过滤则应用
         if start_date is not None or end_date is not None:
@@ -186,6 +273,32 @@ class DataLoader:
         fee_dict.pop("ticker", None)
 
         return fee_dict
+
+    def load_status(self, ticker: str, date_index: pd.DatetimeIndex) -> pd.DataFrame:
+        """Subscription status of one fund on ``date_index``: daily_limit, sub_status, status_source.
+
+        某只基金在给定交易日上的申购状态。
+        """
+        if self.limits == "legacy":
+            cap = self._resample_limits_to_daily(ticker, date_index)
+            sub = np.where(np.isinf(cap), "open", np.where(cap <= 0, "closed", "limited"))
+            return pd.DataFrame({"daily_limit": cap.to_numpy(), "sub_status": sub, "status_source": "legacy"},
+                                index=date_index)
+        if self._status_conn is None:
+            self._status_conn = sqlite3.connect(f"file:{self.status_db.as_posix()}?mode=ro", uri=True,
+                                                check_same_thread=False)
+        rows = pd.read_sql_query("SELECT date, status, amount, source FROM daily_status WHERE fund_code = ?",
+                                 self._status_conn, params=(str(ticker),))
+        rows.index = pd.to_datetime(rows.pop("date"))
+        rows = rows.reindex(date_index)
+        status = rows["status"].fillna("unknown")
+        cap = pd.Series(np.nan, index=date_index)
+        cap[status == "open"] = np.inf
+        cap[status == "closed"] = 0.0
+        limited = status == "limited"
+        cap[limited] = rows.loc[limited, "amount"].astype(float)
+        return pd.DataFrame({"daily_limit": cap.to_numpy(), "sub_status": status.to_numpy(),
+                             "status_source": rows["source"].fillna("default").to_numpy()}, index=date_index)
 
     def _resample_limits_to_daily(
         self, ticker: str, date_index: pd.DatetimeIndex

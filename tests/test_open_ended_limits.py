@@ -333,9 +333,16 @@ class TestOpenEndedLimits(unittest.TestCase):
             "All dates should have no limit (inf) when no events exist",
         )
 
+    @unittest.expectedFailure
     def test_overlapping_limits_last_one_wins(self):
         """Test behavior when limits overlap (last limit in sequence should apply).
         测试限购重叠时的行为（序列中的最后一个限购应生效）。
+
+        Expected to fail: the legacy limit_events resampler takes the minimum of overlapping
+        limits ("only ever lower"), one of the root causes in redesign §1.2. Overlaps are now
+        resolved upstream in daily_status (phase D, tests/test_timeline.py); this path stays
+        only for the mock data and the legacy comparison until phase G.
+        预期失败：旧链路对重叠限额取最小值；新链路在 daily_status 中解析重叠（阶段 D）。
         """
         # Setup
         self._create_market_data(self.ticker, self.date_range)

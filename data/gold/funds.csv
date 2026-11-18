@@ -1,0 +1,20 @@
+fund_code,name,overlays,drafted_by,reviewed_by,notes
+160416,华安标普全球石油LOF,complete,claude 2026-11-18,,2021 unlabeled (no announcements before 2022)
+160723,嘉实原油LOF,complete,claude 2026-11-18,,overlays only from 2024-02-28; purchase already closed before (holiday notices were redemption-only)
+161005,富国天惠LOF,n/a,claude 2026-11-18,,domestic fund: no overseas-holiday closures; 2021-01-04..02-17 unlabeled
+161129,易方达原油LOF,n/a,claude 2026-11-18,,purchase closed for the whole window
+162411,华宝油气LOF,complete,claude 2026-11-18,,2021 unlabeled
+163208,诺安油气LOF,complete,claude 2026-11-18,,2021 unlabeled
+501018,南方原油LOF,complete,claude 2026-11-18,,overlays only from 2022-12-29; purchase closed before
+160128,南方金利定开债券LOF,n/a,claude 2026-11-18,,opens once every three years (2024-05-17..06-14 in window); 2021-01..06 unlabeled because the 2021 window dates are not in the corpus
+161116,易方达黄金主题LOF,complete,claude 2026-11-18,,2021 unlabeled; purchase closed 2022-03-07 onwards except three days in 2024-04
+161125,易方达标普500LOF,complete,claude 2026-11-18,,2021 unlabeled; 2022 H2/2023/2024 overlays from the annual holiday schedules
+161128,易方达标普信息科技LOF,complete,claude 2026-11-18,,2021 unlabeled; same steps as 161125 until 2023-01 then its own A-class reopenings in 2024
+161815,银华抗通胀LOF,complete,claude 2026-11-18,,only multi-fund family notices; overlays read from the paragraph that lists 161815; no notice for the 2023-09-01 and 2023-10-09 HK typhoon days
+162207,泰达宏利效率优选LOF,n/a,claude 2026-11-18,,low confidence: no fund-specific purchase-state notice in the corpus at all
+163417,兴全合宜LOF,complete,claude 2026-11-18,,non-Stock-Connect days from per-holiday notices plus the 2023 annual schedule
+164701,汇添富黄金及贵金属LOF,complete,claude 2026-11-18,,2021 unlabeled; eleven limit changes in 2024
+164906,交银中证海外中国互联网LOF,complete,claude 2026-11-18,,2021 unlabeled
+167506,安信深圳科技LOF,partial,claude 2026-11-18,,three 2023 non-Stock-Connect gaps filled from 163417's schedule (medium); typhoon days 2023-09-01/09-08/10-09 and 2024-09-06 have no notice and stay open
+169201,浙商汇金鼎盈LOF,n/a,claude 2026-11-18,,low confidence: no fund-specific purchase-state notice in the corpus at all; 301 zero-volume days
+501300,海富通美元债LOF,complete,claude 2026-11-18,,RMB share 501300; 2021 unlabeled; follows HK holidays (plus US Labor Day/Thanksgiving in 2024 per notices)
