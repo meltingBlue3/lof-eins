@@ -74,6 +74,25 @@ class BundleResult(NamedTuple):
     fee_config: Dict[str, Any]
 
 
+def published_nav(nav: pd.Series, days: pd.DatetimeIndex, lag: int) -> np.ndarray:
+    """For each day T, the lag-th latest NAV dated before T (NaN if there are fewer than lag).
+    对每个交易日 T，取日期早于 T 的第 lag 个净值（不足 lag 个时为 NaN）。
+
+    Counting on the NAV's own dates keeps the lookup right when the market has no row on some
+    days: lag 1 is always the NAV of the previous NAV day, not of the previous traded day.
+    在净值自己的日期上数，行情缺行时查找仍正确：lag 1 总是上一个净值日的净值，而不是上一个有成交日的净值。
+    """
+    nav = nav.dropna().sort_index()
+    nav = nav[~nav.index.duplicated(keep="last")]
+    out = np.full(len(days), np.nan)
+    if nav.empty:
+        return out
+    pos = nav.index.searchsorted(days, side="left") - lag
+    ok = pos >= 0
+    out[ok] = nav.to_numpy()[pos[ok]]
+    return out
+
+
 class DataLoader:
     """Loads and aligns LOF fund data from multiple sources.
 
@@ -204,10 +223,13 @@ class DataLoader:
         # 只对行情和净值前向填充：限额缺失表示"未知"，不能沿用前一天的值
         df = df.ffill()
 
-        # Premium on the newest NAV a buyer can see at the T 15:00 cut-off (no look-ahead)
-        # 决策时点可见的最新净值计算的溢价（无前视）
+        # Premium on the newest NAV a buyer can see at the T 15:00 cut-off (no look-ahead): the
+        # nav_lag-th latest NAV dated before T, counted on the NAV's own dates, so a day without a
+        # market row (no trades, suspension) does not push the lookup further back.
+        # 决策时点可见的最新净值计算的溢价（无前视）：取日期早于 T 的第 nav_lag 个净值，
+        # 在净值自己的日期上数，没有行情的日子（无成交、停牌）不会让查找多往前退。
         terms = self.load_terms(ticker)
-        df["nav_published"] = df["nav"].shift(terms["nav_lag"])
+        df["nav_published"] = published_nav(df_nav["nav"], df.index, terms["nav_lag"])
         df["premium_published"] = (df["close"] - df["nav_published"]) / df["nav_published"]
 
         # Subscription status per day  # 每日申购状态

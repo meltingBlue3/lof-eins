@@ -12,17 +12,19 @@
 
 设计见 [docs/redesign-subscription-state.md](docs/redesign-subscription-state.md)，各阶段的评估和结果见 [docs/eval/README.md](docs/eval/README.md)。
 
-### 当前结论（2022-01-04 ~ 2024-12-31，410 只基金，1 万元起步）
+### 当前结论（2022-01-04 ~ 2024-12-31，1 万元起步）
 
 | | 保守边界 | 乐观边界 |
 |---|---:|---:|
 | 旧数据（限购数据有缺口） | +7,585%（不分边界） | |
 | 新的每日状态，阶段 E 的假设（统一 1.5%、T+2、T 日净值） | +3.9% | +165% |
-| **加上真实费率、真实可卖日、决策时可见的净值（阶段 F）** | **−46.0%** | **+64.6%** |
-| 阶段 F，申购费打 1 折 | +381% | +1,239% |
+| 加上真实费率、真实可卖日、决策时可见的净值（阶段 F，聚宽行情） | −46.0% | +64.6% |
+| **阶段 F，换用 AKShare 行情（无成交日不能交易）** | **−45.4%** | **+28.3%** |
+| 阶段 F（AKShare 行情），申购费打 1 折 | +378% | +1,172% |
 
-- 按招募说明书的费率，这个策略没有可靠的超额收益：保守边界亏损，乐观边界剔除红旗日后每笔约为 0。
-- 只有拿到大幅申购费折扣时结论才会变。详见 [phase-f-sensitivity.md](docs/eval/phase-f-sensitivity.md)。
+- 按招募说明书的费率，这个策略没有可靠的超额收益：保守边界亏损，乐观边界剔除红旗日后每笔为负（−0.11%）。
+- 只有拿到大幅申购费折扣时结论才会变。详见 [phase-f-sensitivity.md](docs/eval/phase-f-sensitivity.md)（聚宽行情）和 [akshare-migration.md](docs/eval/akshare-migration.md)（换成 AKShare 后的对比）。
+- 聚宽行情在无成交的日子用前收盘价补了记录，回测会在这些日子按旧价格卖出；AKShare 行情没有这些记录，乐观边界因此从 +64.6% 降到 +28.3%。
 
 ## 项目结构
 
@@ -32,7 +34,7 @@ lof-eins/
 │   ├── config.py                    # BacktestConfig
 │   ├── data/
 │   │   ├── loader.py                # DataLoader：行情、净值、每日状态、交易条款
-│   │   ├── downloader.py            # 行情和净值下载（JoinQuant）
+│   │   ├── downloader.py            # 行情和净值下载（AKShare：新浪或东方财富）
 │   │   ├── announcement_downloader.py  # 公告 PDF 下载
 │   │   ├── fund_terms.py            # 申购费率、确认日、净值滞后（天天基金费率页）
 │   │   └── generator/               # 模拟数据生成器（写 daily_status）
@@ -76,7 +78,7 @@ config/fund_pages/               天天基金费率页的缓存
 pip install -r requirements.txt
 ```
 
-复制 `.env.example` 为 `.env` 并填写：JoinQuant 账号用于下载行情，`LOF_LLM_*` 用于公告抽取，可以是任何 OpenAI 兼容的接口。`.env` 不要提交。
+复制 `.env.example` 为 `.env` 并填写 `LOF_LLM_*`，用于公告抽取，可以是任何 OpenAI 兼容的接口。行情和净值来自 AKShare，不需要账号。`.env` 不要提交。
 
 ## 快速开始：模拟数据
 
@@ -94,13 +96,19 @@ python run_backtest.py -c configs/mock_backtest.yaml
 
 ## 实盘数据流水线
 
-每一步都可以重跑，只做缺的部分。只有第 1 步需要 JoinQuant 账号，只有第 4 步和 `llm-triage` 调用模型。
+每一步都可以重跑，只做缺的部分。只有第 4 步和 `llm-triage` 调用模型。
 
-1. **行情和净值**
+1. **行情和净值**（AKShare：默认新浪日线，不复权，成交量单位为份；单位净值来自天天基金）
 
    ```bash
-   python scripts/download_lof.py --start 2021-01-01
+   python scripts/download_lof.py --start 2021-01-01 --end 2024-12-31
    ```
+
+   - 默认下载当前在交易的全部 LOF（新浪列表并上东方财富板块）。名单不含已退市的基金，重建已有样本时用 `--tickers-from data/real_all_lof`（沿用该目录 `market/` 下的基金）。约 400 只基金需要 15 分钟左右。
+   - 无成交的日子没有记录，回测在这些日子不能交易（原聚宽数据用前收盘价和零成交量补齐，允许在这些日子按旧价格卖出）。
+   - `--source eastmoney` 改用东方财富日线（成交量单位是手，保存时换算成份）。东方财富短时间请求过多会封 IP 几分钟到一小时以上，所以请求之间默认间隔 5 秒，被封时自动等待并放慢。
+   - 每只基金抓完立即写盘，中断后重跑会跳过已有的基金，`--refresh` 重新下载。每次运行写 `download_report.csv`，逐只记录行数、起止日期和状态。
+   - 换源时的逐只对比和回测影响见 [docs/eval/akshare-migration.md](docs/eval/akshare-migration.md)。
 
 2. **公告 PDF**
 

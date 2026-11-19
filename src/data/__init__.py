@@ -11,7 +11,7 @@ LOF回测系统数据模块。
 from .loader import BundleResult, DataLoader
 from .generator import MockConfig, generate_mock_data
 
-# Conditional import for downloader (requires jqdatasdk)  # 条件导入下载器（需要jqdatasdk）
+# Conditional import for downloader (requires akshare)  # 条件导入下载器（需要 akshare）
 try:
     from .downloader import RealDataDownloader, download_all_lof
 

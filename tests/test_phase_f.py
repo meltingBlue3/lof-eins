@@ -182,6 +182,19 @@ class TestLoaderTerms(TempData):
         self.assertEqual(loader.load_terms("169999"), {"sell_days": 2, "nav_lag": 1, "terms_source": "default"})
         self.assertEqual(DataLoader(str(self.dir), terms="default").load_terms("160002")["sell_days"], 2)
 
+    def test_published_nav_ignores_days_without_a_market_row(self):
+        # No trades on 03-06 and 03-07: the market file has no rows, the NAV is still published.
+        nav = np.linspace(1.0, 1.2, len(DAYS))
+        self.fund("160001", 1.1, nav)
+        market_path = self.dir / "market" / "160001.parquet"
+        m = pd.read_parquet(market_path)
+        m[~m["date"].isin(pd.to_datetime(["2024-03-06", "2024-03-07"]))].to_parquet(market_path, index=False)
+        df = DataLoader(str(self.dir)).load_bundle("160001").df
+        nav_by_day = pd.Series(nav, index=DAYS)
+        self.assertNotIn(pd.Timestamp("2024-03-06"), df.index)
+        # On 03-08 the newest visible NAV is 03-07's, not 03-05's (the previous traded day).
+        self.assertAlmostEqual(df.loc["2024-03-08", "nav_published"], nav_by_day["2024-03-07"])
+
     def test_fund_terms_required_when_asked(self):
         self.fund("160001", 1.1, 1.0)
         self.assertEqual(DataLoader(str(self.dir)).terms_mode, "default")

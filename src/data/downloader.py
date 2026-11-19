@@ -1,354 +1,384 @@
 """
-Real Data Downloader for LOF funds from JoinQuant.
+LOF market data and NAV downloader on AKShare.
 
-LOF 基金实盘数据下载器（来自聚宽数据源）。
+LOF 行情和净值下载器（数据源：AKShare）。
 
-Downloads market data, NAV, and generates config files compatible with DataLoader.
-下载行情数据、净值数据，并生成与 DataLoader 兼容的配置文件。
+What comes from where / 数据来源：
+- Daily bars (source="sina", the default): ak.fund_etf_hist_sina, unadjusted, volume in shares.
+  Against the JoinQuant files it replaced (410 funds, 2021-2024) the close and the NAV match on
+  every day both have; volume matches except 28 fund-days where Sina shows 0.
+  日线（默认新浪）：ak.fund_etf_hist_sina，不复权，成交量单位为份。与原聚宽数据对比，收盘价和净值逐日一致，
+  成交量只有 28 个基金日新浪为 0。
+- Daily bars (source="eastmoney"): ak.fund_lof_hist_em, unadjusted. Eastmoney reports volume in
+  lots of 100; it is stored in shares (x100, so it carries the rounding of the lots).
+  日线（东方财富）：ak.fund_lof_hist_em，不复权；成交量单位是手，保存时换算成份（x100，带取整误差）。
+- Neither source has a row on a day without trades (JoinQuant filled those with the previous
+  close and volume 0), so nothing can be traded on such a day.
+  两个来源在无成交的日子都没有记录（聚宽会用前收盘价和零成交量补齐），所以这些日子不能交易。
+- Unit NAV: ak.fund_open_fund_info_em(indicator="单位净值走势").  单位净值：ak.fund_open_fund_info_em。
+- LOF list (when no codes are given): the funds trading today, from Sina's list plus Eastmoney's
+  board; a fund that has delisted is on neither, so to rebuild a historical universe pass its tickers.
+  LOF 名单（未指定代码时）：新浪列表并上东方财富板块，只含当前在交易的基金；重建历史样本时要显式传入代码。
 
-Handles batch processing to avoid API rate limits.
-支持批量处理以避免 API 频率限制。
+Eastmoney's push2 quote servers (its LOF board and daily bars) close the connection on a request
+with the default python-requests User-Agent, and refuse an IP for minutes, after repeated triggers
+for over an hour, after a burst of requests. For Eastmoney the downloader sends a browser
+User-Agent, looks each fund's exchange up once for the whole run (fund_lof_hist_em would fetch the
+full LOF board again for every fund), keeps a gap between requests and waits out a refusal. Each
+fund is written as soon as it is fetched, and a rerun skips the funds already on disk.
+东方财富 push2 行情服务器会断开默认 python-requests User-Agent 的请求，短时间请求过多会封 IP
+（反复触发可超过一小时）。用东方财富时，下载器使用浏览器 User-Agent，整次运行只查一次交易所映射，
+请求之间留间隔，被封时等待后继续。每只基金抓完立即写盘，重跑时跳过已有的基金。
+
+Output layout (what DataLoader reads) / 输出目录：
+- market/{ticker}.parquet: date, ticker, open, high, low, close, volume (shares), volume_ma5
+- nav/{ticker}.parquet: date, ticker, nav
+- config/: created empty; subscription_state.db and fund_terms.csv come from
+  scripts/build_corpus.py ... build_timeline.py and scripts/fund_terms.py
+- download_report.csv: one row per fund (rows, first and last date, status)
 """
 
-import os
+from __future__ import annotations
+
+import contextlib
+import random
 import time
-import math
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
-# JoinQuant SDK - optional dependency  # 聚宽 SDK - 可选依赖
 try:
-    import jqdatasdk as jq
-    from jqdatasdk import finance
+    import akshare as ak
+    import requests.sessions
+    from akshare.fund import fund_lof_em as _lof_em
+    from akshare.utils.http import Push2RateLimitError
 
-    JQ_AVAILABLE = True
-except ImportError:
-    JQ_AVAILABLE = False
+    AK_AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised only without akshare installed
+    AK_AVAILABLE = False
+
+    class Push2RateLimitError(Exception):  # type: ignore[no-redef]
+        """Placeholder so the module imports without akshare."""
+
+
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0 Safari/537.36"
+)
+MARKET_COLUMNS = ["date", "ticker", "open", "high", "low", "close", "volume", "volume_ma5"]
+NAV_COLUMNS = ["date", "ticker", "nav"]
+SHARES_PER_LOT = 100
+# Waits after Eastmoney refuses the IP, in seconds; the first refusal usually lifts in about
+# five minutes, repeated ones take longer.  被封后的等待时间（秒）。
+BAN_WAITS = (360, 720, 1500, 3000)
+SOURCES = ("eastmoney", "sina")
+
+
+def exchange_id(ticker: str) -> int:
+    """Eastmoney market id of a fund code: 1 Shanghai (5xxxxx), 0 Shenzhen (1xxxxx).
+    基金代码对应的东方财富市场标识：1 上海，0 深圳。"""
+    return 1 if str(ticker).startswith("5") else 0
+
+
+class ExchangeMap(dict):
+    """Ticker -> market id; a ticker missing from the live LOF board (delisted) falls back to its
+    code prefix, so fund_lof_hist_em can still ask for its history.
+    代码到市场标识的映射；不在当前 LOF 板块的代码（已退市）按代码前缀推断。"""
+
+    def __missing__(self, ticker: str) -> int:
+        return exchange_id(ticker)
+
+
+@contextlib.contextmanager
+def eastmoney_session(code_map: Optional[Dict[str, int]] = None):
+    """Send a browser User-Agent on every requests session and, if given, serve fund_lof_hist_em
+    a fixed exchange map. Both are restored on exit.
+    在上下文内给 requests 会话加浏览器 User-Agent，并让 fund_lof_hist_em 使用固定的交易所映射。"""
+    original_headers = requests.sessions.default_headers
+    original_map = _lof_em._fund_lof_code_id_map_em
+
+    def browser_headers():
+        headers = original_headers()
+        headers["User-Agent"] = BROWSER_UA
+        return headers
+
+    requests.sessions.default_headers = browser_headers
+    if code_map is not None:
+        _lof_em._fund_lof_code_id_map_em = lambda: code_map
+    try:
+        yield
+    finally:
+        requests.sessions.default_headers = original_headers
+        _lof_em._fund_lof_code_id_map_em = original_map
+
+
+def list_lofs() -> Dict[str, int]:
+    """Codes on Eastmoney's LOF board today, with their market ids.
+    东方财富 LOF 板块当前的基金代码及市场标识。"""
+    with eastmoney_session():
+        return {str(k): int(v) for k, v in _lof_em._fund_lof_code_id_map_em().items()}
+
+
+def list_lofs_sina() -> Dict[str, int]:
+    """Codes on Sina's LOF list today, with Eastmoney-style market ids (1 Shanghai, 0 Shenzhen).
+    新浪 LOF 列表当前的基金代码及市场标识。"""
+    df = ak.fund_etf_category_sina(symbol="LOF基金")
+    return {c[2:]: 1 if c.startswith("sh") else 0 for c in df["代码"].astype(str)}
+
+
+def market_frame(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
+    """fund_lof_hist_em output -> the market parquet layout (volume in shares).
+    把 fund_lof_hist_em 的结果转成行情文件格式（成交量换算为份）。"""
+    if raw is None or raw.empty:
+        return pd.DataFrame(columns=MARKET_COLUMNS)
+    df = pd.DataFrame({
+        "date": pd.to_datetime(raw["日期"]),
+        "ticker": ticker,
+        "open": pd.to_numeric(raw["开盘"], errors="coerce"),
+        "high": pd.to_numeric(raw["最高"], errors="coerce"),
+        "low": pd.to_numeric(raw["最低"], errors="coerce"),
+        "close": pd.to_numeric(raw["收盘"], errors="coerce"),
+        "volume": pd.to_numeric(raw["成交量"], errors="coerce").astype(float) * SHARES_PER_LOT,
+    })
+    df = df.sort_values("date").drop_duplicates("date", keep="last").reset_index(drop=True)
+    df["volume_ma5"] = df["volume"].rolling(window=5).mean().fillna(df["volume"])
+    return df[MARKET_COLUMNS]
+
+
+def sina_symbol(ticker: str) -> str:
+    """Sina's symbol for a fund code: sh501018, sz161226.  新浪的代码格式。"""
+    return ("sh" if exchange_id(ticker) == 1 else "sz") + str(ticker)
+
+
+def sina_frame(raw: pd.DataFrame, ticker: str, start: str, end: str) -> pd.DataFrame:
+    """fund_etf_hist_sina output (full history, volume in shares) -> the market parquet layout,
+    cut to [start, end]. The moving average is taken after the cut, as for Eastmoney's bars.
+    把 fund_etf_hist_sina 的结果（全部历史，成交量单位为份）转成行情文件格式并截取到区间内。"""
+    if raw is None or raw.empty:
+        return pd.DataFrame(columns=MARKET_COLUMNS)
+    df = pd.DataFrame({
+        "date": pd.to_datetime(raw["date"]),
+        "ticker": ticker,
+        **{c: pd.to_numeric(raw[c], errors="coerce") for c in ("open", "high", "low", "close")},
+        "volume": pd.to_numeric(raw["volume"], errors="coerce").astype(float),
+    })
+    df = df[(df["date"] >= pd.Timestamp(start)) & (df["date"] <= pd.Timestamp(end))]
+    df = df.sort_values("date").drop_duplicates("date", keep="last").reset_index(drop=True)
+    df["volume_ma5"] = df["volume"].rolling(window=5).mean().fillna(df["volume"])
+    return df[MARKET_COLUMNS]
+
+
+def nav_frame(raw: pd.DataFrame, ticker: str, start: str, end: str) -> pd.DataFrame:
+    """fund_open_fund_info_em output -> the NAV parquet layout, cut to [start, end].
+    把 fund_open_fund_info_em 的结果转成净值文件格式，并截取到区间内。"""
+    if raw is None or raw.empty:
+        return pd.DataFrame(columns=NAV_COLUMNS)
+    df = pd.DataFrame({
+        "date": pd.to_datetime(raw["净值日期"]),
+        "ticker": ticker,
+        "nav": pd.to_numeric(raw["单位净值"], errors="coerce"),
+    })
+    df = df[(df["date"] >= pd.Timestamp(start)) & (df["date"] <= pd.Timestamp(end))]
+    df = df.sort_values("date").drop_duplicates("date", keep="last").reset_index(drop=True)
+    return df[NAV_COLUMNS]
 
 
 class RealDataDownloader:
-    """Downloads real LOF data from JoinQuant API.
-    从聚宽 API 下载 LOF 实盘数据。
-
-    Creates data in the standard directory structure expected by DataLoader:
-    在 DataLoader 期望的标准目录结构中创建数据：
-    - market/{ticker}.parquet
-    - nav/{ticker}.parquet
-    - config/ (created empty; subscription_state.db and fund_terms.csv come from
-      scripts/build_corpus.py ... build_timeline.py and scripts/fund_terms.py)
+    """Downloads LOF daily bars and unit NAV from AKShare into the DataLoader layout.
+    从 AKShare 下载 LOF 日线和单位净值，写成 DataLoader 读取的目录结构。
 
     Attributes:
         output_dir: Root directory for downloaded data.  # 下载数据的根目录
-        batch_size: Number of funds to process per API batch.  # 每个 API 批次处理的基金数量
+        source: Daily bars from "eastmoney" (fund_lof_hist_em) or "sina" (fund_etf_hist_sina).
+            日线来源。
+        pause: Minimum seconds between two quote requests to Eastmoney.  # 两次东方财富行情请求的最小间隔
+        sina_pause: Minimum seconds between two requests to Sina.  # 两次新浪请求的最小间隔
+        nav_pause: Minimum seconds between two NAV requests.  # 两次净值请求的最小间隔
+        ban_waits: Seconds to wait after each successive refusal.  # 连续被封时依次等待的秒数
+        max_errors_in_row: Stop after this many funds in a row fail (the source is likely
+            refusing requests).  # 连续这么多只基金出错就停止（数据源多半在拒绝请求）
     """
 
-    def __init__(self, output_dir: str = "./data/real_all_lof", batch_size: int = 50):
-        """Initialize downloader.
-        初始化下载器。
-
-        Args:
-            output_dir: Root directory for output data.  # 输出数据的根目录
-            batch_size: Number of funds per batch (default 50 to avoid API limits).  # 每批次基金数量（默认 50 以避免 API 限制）
-        """
-        if not JQ_AVAILABLE:
-            raise ImportError(
-                "jqdatasdk is required for RealDataDownloader. "
-                "Install with: pip install jqdatasdk"
-            )
-
+    def __init__(self, output_dir: str = "./data/real_all_lof", source: str = "sina",
+                 pause: float = 5.0, sina_pause: float = 1.5, nav_pause: float = 0.5,
+                 ban_waits: Iterable[float] = BAN_WAITS, max_pause: float = 30.0,
+                 max_errors_in_row: int = 5, sleep: Callable[[float], None] = time.sleep):
+        if not AK_AVAILABLE:
+            raise ImportError("akshare is required for RealDataDownloader: pip install akshare")
+        if source not in SOURCES:
+            raise ValueError(f"source must be one of {SOURCES}, got {source!r}")
+        self.source = source
+        self.sina_pause = sina_pause
+        self.max_errors_in_row = max_errors_in_row
         self.output_dir = Path(output_dir)
-        self.batch_size = batch_size
         self.market_dir = self.output_dir / "market"
         self.nav_dir = self.output_dir / "nav"
         self.config_dir = self.output_dir / "config"
-        self._authenticated = False
-
-    def authenticate(self, username: str, password: str) -> bool:
-        """Authenticate with JoinQuant API.
-        使用聚宽 API 进行身份验证。
-
-        Args:
-            username: JoinQuant account username.  # 聚宽账户用户名
-            password: JoinQuant account password.  # 聚宽账户密码
-
-        Returns:
-            True if authentication successful, False otherwise.  # 认证成功返回 True，否则返回 False
-        """
-        try:
-            jq.auth(username, password)
-            count = jq.get_query_count()
-            print(
-                f"[OK] JoinQuant login successful | Quota: {count['spare']}/{count['total']}"
-            )
-            self._authenticated = True
-            return True
-        except Exception as e:
-            print(f"[ERROR] Login failed: {e}")
-            return False
-
-    def authenticate_from_env(self) -> bool:
-        """Authenticate using environment variables JQ_USERNAME and JQ_PASSWORD.
-        使用环境变量 JQ_USERNAME 和 JQ_PASSWORD 进行身份验证。
-
-        Returns:
-            True if authentication successful, False otherwise.  # 认证成功返回 True，否则返回 False
-        """
-        username = os.environ.get("JQ_USERNAME")
-        password = os.environ.get("JQ_PASSWORD")
-
-        if not username or not password:
-            print("[ERROR] JQ_USERNAME and JQ_PASSWORD environment variables not set")
-            return False
-
-        return self.authenticate(username, password)
+        self.pause = pause
+        self.nav_pause = nav_pause
+        self.ban_waits = tuple(ban_waits)
+        self.max_pause = max_pause
+        self._sleep = sleep
+        self._last: Dict[str, float] = {}
+        self._strikes = 0   # refusals since the last request that went through
 
     def _setup_directories(self) -> None:
-        """Create standard directory structure.
-        创建标准目录结构。
-        """
-        for d in [self.market_dir, self.nav_dir, self.config_dir]:
+        for d in (self.market_dir, self.nav_dir, self.config_dir):
             d.mkdir(parents=True, exist_ok=True)
-        print(f"[OK] Directory structure ready: {self.output_dir}")
 
-    def fetch_all_lof_codes(self, reference_date: str) -> List[str]:
-        """Fetch all LOF fund codes from JoinQuant.
-        从聚宽获取所有 LOF 基金代码。
+    def _wait(self, kind: str, gap: float) -> None:
+        """Keep at least `gap` seconds (plus jitter) since the last request of this kind."""
+        last = self._last.get(kind)
+        if last is not None:
+            remaining = gap + random.uniform(0, gap / 2) - (time.monotonic() - last)
+            if remaining > 0:
+                self._sleep(remaining)
+        self._last[kind] = time.monotonic()
 
-        Args:
-            reference_date: Reference date for fund list (YYYY-MM-DD).  # 基金列表的参考日期（YYYY-MM-DD）
-
-        Returns:
-            List of fund codes (e.g., ['160105.XSHE', '161005.XSHE']).  # 基金代码列表
-        """
-        print(
-            f"\n>>> Fetching all LOF fund codes (reference date: {reference_date})..."
-        )
-        try:
-            df = jq.get_all_securities(types=["lof"], date=reference_date)
-            codes = df.index.tolist()
-            print(f"    [OK] Found {len(codes)} LOF funds")
-            return codes
-        except Exception as e:
-            print(f"[ERROR] Failed to fetch LOF list: {e}")
-            return []
-
-    def _get_market_data(
-        self, codes: List[str], start_date: str, end_date: str
-    ) -> pd.DataFrame:
-        """Fetch market OHLCV data for a batch of codes.
-        获取一批代码的行情 OHLCV 数据。
-        """
-        try:
-            df = jq.get_price(
-                codes,
-                start_date=start_date,
-                end_date=end_date,
-                frequency="daily",
-                fields=["open", "close", "high", "low", "volume"],
-                skip_paused=False,
-                fq="none",
-            )
-            if df.empty:
-                return pd.DataFrame()
-
-            df = df.reset_index()
-            # Handle different JQ versions ('time' vs 'date')  # 处理不同聚宽版本（'time' vs 'date'）
-            if "time" in df.columns:
-                df["date"] = df["time"].dt.date
-                df = df.drop(columns=["time"])
-
-            df["date"] = pd.to_datetime(df["date"])
-            return df
-        except Exception as e:
-            print(f"    [WARN] Market data batch error: {e}")
-            return pd.DataFrame()
-
-    def _get_nav_data(
-        self, codes: List[str], start_date: str, end_date: str
-    ) -> pd.DataFrame:
-        """Fetch NAV data for a batch of codes via akshare.
-        通过 akshare 获取一批代码的净值数据。
-        """
-        try:
-            import akshare as ak
-        except ImportError:
-            print("    [ERROR] akshare is required for NAV download: pip install akshare")
-            return pd.DataFrame()
-
-        start_dt = pd.Timestamp(start_date)
-        end_dt = pd.Timestamp(end_date)
-        frames = []
-
-        for code in codes:
-            ticker_pure = code.split(".")[0]
+    def _with_ban_waits(self, call: Callable, what: str):
+        """Run a push2 request. When Eastmoney refuses the IP, wait (longer each time in a row),
+        slow the pace by half and retry; give up after len(ban_waits) refusals in a row.
+        执行一次 push2 请求；被封时等待（连续被封则越等越久）、放慢节奏后重试，连续被封超过次数则放弃。"""
+        while True:
             try:
-                df = ak.fund_open_fund_info_em(symbol=ticker_pure, indicator="单位净值走势")
-                if df.empty:
-                    continue
-                # Columns: 净值日期, 单位净值, 日增长率
-                df = df.rename(columns={"净值日期": "date", "单位净值": "nav"})
-                df["date"] = pd.to_datetime(df["date"])
-                df = df[(df["date"] >= start_dt) & (df["date"] <= end_dt)]
-                df["nav"] = pd.to_numeric(df["nav"], errors="coerce")
-                df["code"] = code
-                frames.append(df[["date", "code", "nav"]])
-            except Exception as e:
-                print(f"    [WARN] NAV for {ticker_pure}: {e}")
+                result = call()
+            except Push2RateLimitError:
+                if self._strikes >= len(self.ban_waits):
+                    raise
+                wait = self.ban_waits[self._strikes]
+                self._strikes += 1
+                self.pause = min(self.pause * 1.5, self.max_pause)
+                print(f"    [WAIT] Eastmoney refused the IP at {what}; retrying in {wait / 60:.0f} min, "
+                      f"then {self.pause:.1f}s between requests")
+                self._sleep(wait)
+                self._last.pop("quote", None)
+                continue
+            self._strikes = 0
+            return result
 
-        if not frames:
-            return pd.DataFrame()
-        return pd.concat(frames, ignore_index=True)
+    def _quote(self, call: Callable, what: str):
+        """A paced push2 request with ban waits."""
+        def paced():
+            self._wait("quote", self.pause)
+            return call()
+        return self._with_ban_waits(paced, what)
 
-    def _process_and_save(
-        self, codes: List[str], price_df: pd.DataFrame, nav_df: pd.DataFrame
-    ) -> List[str]:
-        """Process and save data for a batch of funds.
-        处理并保存一批基金的数据。
+    def fetch_market(self, ticker: str, start: str, end: str) -> pd.DataFrame:
+        if self.source == "sina":
+            self._wait("sina", self.sina_pause)
+            return sina_frame(ak.fund_etf_hist_sina(symbol=sina_symbol(ticker)), ticker, start, end)
+        raw = self._quote(lambda: ak.fund_lof_hist_em(
+            symbol=ticker, period="daily", start_date=start.replace("-", ""),
+            end_date=end.replace("-", ""), adjust=""), ticker)
+        return market_frame(raw, ticker)
 
-        Returns:
-            List of successfully processed ticker codes (pure, without exchange suffix).  # 成功处理的标的代码列表（不含交易所后缀）
-        """
-        processed_tickers = []
+    def fetch_nav(self, ticker: str, start: str, end: str) -> pd.DataFrame:
+        self._wait("nav", self.nav_pause)
+        return nav_frame(ak.fund_open_fund_info_em(symbol=ticker, indicator="单位净值走势"), ticker, start, end)
 
-        for code in codes:
-            ticker_pure = code.split(".")[0]
+    def fetch_all_lof_codes(self) -> Dict[str, int]:
+        """LOF codes trading today with their market ids; delisted funds are not included.
+        With Sina as the source: Sina's list plus Eastmoney's board when Eastmoney answers (each
+        list misses funds the other has). With Eastmoney: its board.
+        当前在交易的 LOF 代码及市场标识（不含已退市基金）。新浪来源：新浪列表并上东方财富板块
+        （东方财富可用时；两份列表各缺一些基金）；东方财富来源：东方财富板块。"""
+        if self.source == "eastmoney":
+            return self._quote(list_lofs, "the LOF list")
+        self._wait("sina", self.sina_pause)
+        board = list_lofs_sina()
+        try:
+            extra = {k: v for k, v in list_lofs().items() if k not in board}
+            board.update(extra)
+            print(f"    LOF list: {len(board) - len(extra)} from Sina, {len(extra)} more from Eastmoney")
+        except Exception as exc:  # Eastmoney refusing the IP must not stop a Sina download
+            print(f"    LOF list: {len(board)} from Sina; Eastmoney's board unavailable ({type(exc).__name__})")
+        return board
 
-            # Process market data  # 处理行情数据
-            if not price_df.empty:
-                df_m = price_df[price_df["code"] == code].copy()
-                if not df_m.empty:
-                    df_m["ticker"] = ticker_pure
-                    df_m = df_m.sort_values("date")
-                    df_m["volume_ma5"] = (
-                        df_m["volume"].rolling(window=5).mean().fillna(df_m["volume"])
-                    )
-
-                    cols = [
-                        "date",
-                        "ticker",
-                        "open",
-                        "high",
-                        "low",
-                        "close",
-                        "volume",
-                        "volume_ma5",
-                    ]
-                    final_cols = [c for c in cols if c in df_m.columns]
-
-                    save_path = self.market_dir / f"{ticker_pure}.parquet"
-                    df_m[final_cols].to_parquet(save_path, index=False)
-
-            # Process NAV data  # 处理净值数据
-            if not nav_df.empty:
-                df_n = nav_df[nav_df["code"] == code].copy()
-                if not df_n.empty:
-                    df_n["ticker"] = ticker_pure
-                    df_n = df_n.sort_values("date")
-                    df_n = df_n.drop_duplicates(subset=["date"], keep="last")
-
-                    nav_cols = ["date", "ticker", "nav"]
-                    save_path = self.nav_dir / f"{ticker_pure}.parquet"
-                    df_n[nav_cols].to_parquet(save_path, index=False)
-
-                    processed_tickers.append(ticker_pure)
-
-        return list(set(processed_tickers))
-
-    def download(
-        self, start_date: str, end_date: str, codes: Optional[List[str]] = None
-    ) -> Tuple[int, List[str]]:
-        """Download LOF data for specified date range.
-        下载指定日期范围的 LOF 数据。
+    def download(self, start_date: str, end_date: str, codes: Optional[List[str]] = None,
+                 refresh: bool = False) -> Tuple[int, List[str]]:
+        """Download bars and NAV for [start_date, end_date] (YYYY-MM-DD).
+        下载区间内的日线和净值。
 
         Args:
-            start_date: Start date (YYYY-MM-DD).  # 开始日期（YYYY-MM-DD）
-            end_date: End date (YYYY-MM-DD).  # 结束日期（YYYY-MM-DD）
-            codes: Optional list of fund codes. If None, downloads all LOFs.  # 可选的基金代码列表。如果为 None，下载所有 LOF
+            codes: Fund codes; None downloads every fund on today's LOF board.
+                基金代码；为 None 时下载当前 LOF 板块的全部基金。
+            refresh: Fetch again funds whose files already exist.  # 已有文件的基金也重新下载
 
         Returns:
-            Tuple of (total_processed_count, list_of_processed_tickers).  # (总处理数量, 已处理的标的列表) 元组
+            (count, tickers) of funds that have both a market and a NAV file.
+            同时有行情和净值文件的基金数量及代码。
         """
-        if not self._authenticated:
-            raise RuntimeError("Not authenticated. Call authenticate() first.")
-
         self._setup_directories()
-
-        # Get fund list if not provided  # 如果未提供则获取基金列表
         if codes is None:
-            codes = self.fetch_all_lof_codes(end_date)
-
-        if not codes:
-            return 0, []
-
-        total_funds = len(codes)
-        total_batches = math.ceil(total_funds / self.batch_size)
-
-        print(
-            f"\n>>> Starting download: {total_funds} funds in {total_batches} batches..."
-        )
-
-        all_processed_tickers = []
-
-        # Batch processing  # 批量处理
-        for i in range(0, total_funds, self.batch_size):
-            batch_codes = codes[i : i + self.batch_size]
-            current_batch = (i // self.batch_size) + 1
-
-            print(
-                f"\n[Batch {current_batch}/{total_batches}] Processing {len(batch_codes)} funds..."
-            )
-
-            # Download data  # 下载数据
-            price_df = self._get_market_data(batch_codes, start_date, end_date)
-            nav_df = self._get_nav_data(batch_codes, start_date, end_date)
-
-            # Save data  # 保存数据
-            processed = self._process_and_save(batch_codes, price_df, nav_df)
-            all_processed_tickers.extend(processed)
-
-            print(f"    -> Saved {len(processed)} funds")
-
-            # Rate limiting  # 频率限制
-            time.sleep(0.5)
-
-        print(
-            f"\n>>> All batches complete. Total processed: {len(all_processed_tickers)} funds."
-        )
-        if all_processed_tickers:
-            print(f"\n[SUCCESS] Download complete! Data path: {self.output_dir}")
+            board = ExchangeMap(self.fetch_all_lof_codes())
+            codes = sorted(board)
         else:
-            print("\n[WARN] No valid data downloaded.")
+            # The exchange follows from the code, so a given list needs no request for the board.
+            board = ExchangeMap()
+        codes = [str(c).split(".")[0] for c in codes]
+        print(f">>> {len(codes)} funds, {start_date} ~ {end_date}, daily bars from {self.source}")
 
-        return len(all_processed_tickers), all_processed_tickers
+        report = []
+        errors_in_row = 0
+        with eastmoney_session(board):
+            for i, ticker in enumerate(codes, 1):
+                market_path = self.market_dir / f"{ticker}.parquet"
+                nav_path = self.nav_dir / f"{ticker}.parquet"
+                row = {"ticker": ticker, "source": self.source}
+                if not refresh and market_path.exists() and nav_path.exists():
+                    row.update(_file_summary(market_path, nav_path), status="kept")
+                    report.append(row)
+                    continue
+                try:
+                    market = self.fetch_market(ticker, start_date, end_date)
+                    nav = self.fetch_nav(ticker, start_date, end_date)
+                except Push2RateLimitError:
+                    print(f"[STOP] Eastmoney still refuses the IP after {len(self.ban_waits)} waits; "
+                          f"rerun later to continue from {ticker}")
+                    report.append({**row, "status": "stopped: rate limited"})
+                    break
+                except Exception as exc:  # one bad fund must not stop the run
+                    print(f"  [{i}/{len(codes)}] {ticker}: error {exc!r}")
+                    report.append({**row, "status": f"error: {type(exc).__name__}: {exc}"[:200]})
+                    errors_in_row += 1
+                    if errors_in_row >= self.max_errors_in_row:
+                        print(f"[STOP] {errors_in_row} funds in a row failed; the source is probably refusing "
+                              f"requests. Rerun later to continue from {ticker}")
+                        break
+                    continue
+                errors_in_row = 0
+                if not market.empty:
+                    market.to_parquet(market_path, index=False)
+                if not nav.empty:
+                    nav.to_parquet(nav_path, index=False)
+                status = "ok" if not market.empty and not nav.empty else (
+                    "no market data" if market.empty and not nav.empty else
+                    "no NAV" if not market.empty else "no data")
+                row.update(market_rows=len(market), nav_rows=len(nav),
+                           first_date=_day(market["date"].min()) if len(market) else None,
+                           last_date=_day(market["date"].max()) if len(market) else None, status=status)
+                report.append(row)
+                print(f"  [{i}/{len(codes)}] {ticker}: {len(market)} bars, {len(nav)} NAV  {status}")
+
+        pd.DataFrame(report).to_csv(self.output_dir / "download_report.csv", index=False, encoding="utf-8-sig")
+        done = [r["ticker"] for r in report if r.get("status") in ("ok", "kept")]
+        print(f">>> {len(done)} funds with bars and NAV in {self.output_dir} (report: download_report.csv)")
+        return len(done), done
 
 
-def download_all_lof(
-    username: str,
-    password: str,
-    start_date: str,
-    end_date: str,
-    output_dir: str = "./data/real_all_lof",
-    batch_size: int = 50,
-) -> Tuple[int, List[str]]:
-    """Convenience function to download all LOF data.
-    下载所有 LOF 数据的便捷函数。
+def _day(ts) -> Optional[str]:
+    return None if pd.isna(ts) else pd.Timestamp(ts).strftime("%Y-%m-%d")
 
-    Args:
-        username: JoinQuant username.  # 聚宽用户名
-        password: JoinQuant password.  # 聚宽密码
-        start_date: Start date (YYYY-MM-DD).  # 开始日期（YYYY-MM-DD）
-        end_date: End date (YYYY-MM-DD).  # 结束日期（YYYY-MM-DD）
-        output_dir: Output directory path.  # 输出目录路径
-        batch_size: Batch size for API calls.  # API 调用的批次大小
 
-    Returns:
-        Tuple of (total_processed_count, list_of_processed_tickers).  # (总处理数量, 已处理的标的列表) 元组
-    """
-    downloader = RealDataDownloader(output_dir=output_dir, batch_size=batch_size)
+def _file_summary(market_path: Path, nav_path: Path) -> dict:
+    dates = pd.read_parquet(market_path, columns=["date"])["date"]
+    return {"market_rows": len(dates), "nav_rows": len(pd.read_parquet(nav_path, columns=["date"])),
+            "first_date": _day(dates.min()), "last_date": _day(dates.max())}
 
-    if not downloader.authenticate(username, password):
-        return 0, []
 
-    return downloader.download(start_date, end_date)
+def download_all_lof(start_date: str, end_date: str, output_dir: str = "./data/real_all_lof",
+                     codes: Optional[List[str]] = None) -> Tuple[int, List[str]]:
+    """Download bars and NAV for every fund on today's LOF board (or `codes`).
+    下载当前 LOF 板块全部基金（或指定代码）的日线和净值。"""
+    return RealDataDownloader(output_dir=output_dir).download(start_date, end_date, codes=codes)

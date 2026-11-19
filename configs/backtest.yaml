@@ -45,7 +45,7 @@ fee_discount: 1.0
 
 # Data source directory (relative or absolute path)
 # - ./data/mock        : Mock data for testing
-# - ./data/real_all_lof: Real data downloaded from JoinQuant
+# - ./data/real_all_lof: Real data (bars and NAV from AKShare, see scripts/download_lof.py)
 # data_dir: ./data/real_all_lof
 data_dir: ./data/real_all_lof
 
